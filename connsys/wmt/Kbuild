@@ -1,0 +1,18 @@
+ccflags-y := -Wno-error -w -include /home/matveysazhnov.guest/z301ml-port/connsys/compat/z301_compat.h -I/home/matveysazhnov.guest/z301ml-port/connsys/compat \
+  -I$(src)/linux/include -I$(src)/core/include -I$(src)/include -I$(src)/common_detect \
+  -I$(src)/mt6735/include -I/home/matveysazhnov.guest/z301ml-port/connsys/btif/common/inc \
+  -DWMT_PLAT_ALPS=1 -DWMT_UART_RX_MODE_WORK=0 -DWMT_SDIO_MODE=1 -DWMT_CREATE_NODE_DYNAMIC=1 \
+  -DCONFIG_MTK_COMBO_CHIP_CONSYS_6735=1 -DMTK_WCN_SOC_CHIP_SUPPORT=1 -DCONSYS_BT_WIFI_SHARE_V33=0 \
+  -DMTK_WCN_WMT_STP_EXP_SYMBOL_ABSTRACT=1 -DCFG_WMT_PS_SUPPORT=1
+obj-m += mtk_wmt.o
+mtk_wmt-y := core/wmt_core.o core/wmt_ctrl.o core/wmt_func.o core/wmt_lib.o core/wmt_conf.o core/wmt_exp.o \
+  core/wmt_ic_soc.o core/stp_exp.o core/stp_core.o core/psm_core.o core/btm_core.o \
+  linux/osal.o linux/stp_btif.o linux/stp_dbg.o linux/stp_dbg_soc.o linux/wmt_dev.o linux/wmt_dbg.o \
+  linux/bgw_desense.o linux/wmt_idc.o \
+  mt6735/mtk_wcn_consys_hw.o mt6735/wmt_plat_alps.o \
+  common_detect/wmt_detect.o common_detect/wmt_detect_pwr.o common_detect/wmt_gpio.o common_detect/mtk_wcn_stub_alps.o z301_stubs.o
+KBUILD_EXTRA_SYMBOLS := /home/matveysazhnov.guest/z301ml-port/connsys/btif/common/Module.symvers
+obj-m += stp_bt.o
+stp_bt-y := linux/stp_chrdev_bt.o
+obj-m += btmtkstp.o
+btmtkstp-y := linux/btmtkstp.o

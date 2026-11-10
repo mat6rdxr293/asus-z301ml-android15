@@ -1,0 +1,18 @@
+[binaries]
+ar = '/Users/matveysazhnov/Library/Android/sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar'
+c = ['/Users/matveysazhnov/Library/Android/sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android35-clang']
+cpp = ['/Users/matveysazhnov/Library/Android/sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android35-clang++', '-fno-exceptions', '-fno-unwind-tables', '-fno-asynchronous-unwind-tables', '-static-libstdc++']
+c_ld = 'lld'
+cpp_ld = 'lld'
+strip = '/Users/matveysazhnov/Library/Android/sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strip'
+pkg-config = '/opt/homebrew/bin/pkg-config'
+
+[properties]
+needs_exe_wrapper = true
+pkg_config_libdir = '/Users/matveysazhnov/ASUS-Z301ML-port/gpu/prefix/lib/pkgconfig'
+
+[host_machine]
+system = 'android'
+cpu_family = 'aarch64'
+cpu = 'armv8'
+endian = 'little'

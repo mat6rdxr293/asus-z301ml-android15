@@ -1,0 +1,231 @@
+diff --git a/arch/arm64/boot/dts/mediatek/Makefile b/arch/arm64/boot/dts/mediatek/Makefile
+index 0f7ea0390..3ad93b00c 100644
+--- a/arch/arm64/boot/dts/mediatek/Makefile
++++ b/arch/arm64/boot/dts/mediatek/Makefile
+@@ -182,3 +182,5 @@ DTC_FLAGS_mt7988a-bananapi-bpi-r4-2g5 := -@
+ DTC_FLAGS_mt7988a-bananapi-bpi-r4-pro-4e := -@
+ DTC_FLAGS_mt7988a-bananapi-bpi-r4-pro-8x := -@
+ DTC_FLAGS_mt8395-radxa-nio-12l := -@
++dtb-$(CONFIG_ARCH_MEDIATEK) += mt6735-asus-p00l.dtb
++dtb-$(CONFIG_ARCH_MEDIATEK) += mt6735-asus-p00l-v2.dtb
+diff --git a/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v2.dts b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v2.dts
+new file mode 100644
+index 000000000..b5e1dcd78
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v2.dts
+@@ -0,0 +1,152 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * ASUS ZenPad 10 Z301ML / P00L (ASUS8735_TB_301_N)
++ * MT8735A (MT6735 family)
++ *
++ * BRING-UP V2 — build and offline analysis only, NOT validated on hardware.
++ * Extracted board wiring from factory 3.18 recovery DTB.
++ * Do not deploy without proving a reliable rollback path.
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/interrupt-controller/irq.h>
++#include "mt6735.dtsi"
++
++/ {
++	model = "ASUS ZenPad 10 Z301ML (P00L) - mainline bring-up v2";
++	compatible = "asus,z301ml", "mediatek,mt6735";
++
++	aliases {
++		serial0 = &uart0;
++	};
++
++	chosen {
++		stdout-path = "serial0:921600n8";
++
++		/*
++		 * Placeholder for LK framebuffer handoff. LK reports videolfb
++		 * via its bootargs, but the PHYSICAL framebuffer address, stride
++		 * and actual panel resolution are not recovered yet. DO NOT
++		 * invent these values: simplefb must stay disabled until we
++		 * patch valid reg/width/height/stride/format from real logs.
++		 */
++		lk_framebuffer: framebuffer {
++			compatible = "simple-framebuffer";
++			status = "disabled";
++		};
++	};
++
++	/*
++	 * The factory DTB advertises a conservative 496 MiB initial region.
++	 * Actual physical RAM appears to be ~3 GiB; mapping remaining banks
++	 * requires secure-memory and modem carveout audit first.
++	 */
++	memory@40000000 {
++		device_type = "memory";
++		reg = <0 0x40000000 0 0x1f000000>;
++	};
++
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		/* From factory DTB: ARM Trusted Firmware, DO NOT MAP. */
++		atf@43000000 {
++			reg = <0 0x43000000 0 0x00030000>;
++			no-map;
++		};
++
++		/*
++		 * Factory kernel specifies a region at 0x43f10000.
++		 * On mainline use a single ramoops owner, not the overlapping
++		 * vendor ram_console (0x43f00000..0x43f80000).
++		 */
++		ramoops@43f10000 {
++			compatible = "ramoops";
++			reg = <0 0x43f10000 0 0x000e0000>;
++			record-size = <0x00080000>;
++			console-size = <0x00010000>;
++			ftrace-size = <0x00020000>;
++			pmsg-size = <0x00010000>;
++		};
++
++		minirdump@43ff0000 {
++			reg = <0 0x43ff0000 0 0x00010000>;
++			no-map;
++		};
++	};
++};
++
++&uart0 {
++	status = "okay";
++};
++
++/* Built-in eMMC on MSDC0, x8. Keep conservative 52 MHz while bringing up. */
++&mmc0 {
++	status = "okay";
++	bus-width = <8>;
++	max-frequency = <52000000>;
++	cap-mmc-highspeed;
++	non-removable;
++};
++
++/*
++ * External microSD slot on MSDC1, x4.
++ * Stock DTB: GPIO11 active-low card-detect.
++ * Not essential for first boot, but board wiring is grounded.
++ */
++&mmc1 {
++	status = "okay";
++	bus-width = <4>;
++	max-frequency = <50000000>;
++	cap-sd-highspeed;
++	cd-gpios = <&pio 11 GPIO_ACTIVE_LOW>;
++};
++
++/*
++ * Vendor DTS: FocalTech FT5826 at I2C1 address 0x38.
++ * IRQ is GPIO10 (falling edge), reset GPIO131.
++ * Current edt-ft5x06 driver does NOT match focaltech,ft5826;
++ * keep the node disabled until a driver/ID match is confirmed.
++ */
++&i2c1 {
++	status = "okay";
++	clock-frequency = <400000>;
++
++	touchscreen@38 {
++		compatible = "focaltech,ft5826";
++		reg = <0x38>;
++		interrupt-parent = <&pio>;
++		interrupts = <10 IRQ_TYPE_EDGE_FALLING>;
++		reset-gpios = <&pio 131 GPIO_ACTIVE_LOW>;
++		/* Preserve wiring, but do not bind an unverified driver. */
++		status = "disabled";
++	};
++};
++
++/*
++ * MUSB at 0x11200000 with TPHY at 0x11210000.
++ * Gadget/console needs CONFIG_USB_MUSB_MEDIATEK and a functioning UDC.
++ * No verified VBUS/PMIC role signaling yet, forcing peripheral role only.
++ */
++&usb2phy {
++	status = "okay";
++};
++
++&usb2 {
++	status = "okay";
++	dr_mode = "peripheral";
++	maximum-speed = "high-speed";
++};
++
++/*
++ * LCD: vendor lcm GPIO power=147, backlight=3, reset=146.
++ * DSI is present in mt6735.dtsi, but panel model and init sequence
++ * remain unknown. Therefore do not enable &dsi yet.
++ *
++ * PMIC, Wi-Fi, audio, LTE, camera, GPU, touch remain unsupported or
++ * unverified. This build is for UART, pstore, eMMC and USB bring-up.
++ */
+diff --git a/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l.dts b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l.dts
+new file mode 100644
+index 000000000..6d0488eaa
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l.dts
+@@ -0,0 +1,57 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * ASUS ZenPad 10 Z301ML / P00L (asus8735_tb_301_n)
++ * EXPERIMENTAL MT6735 MAINLINE EARLY BRING-UP ONLY.
++ * Do not flash without validated power management and recovery procedure.
++ */
++
++/dts-v1/;
++
++#include "mt6735.dtsi"
++
++/ {
++	model = "ASUS ZenPad 10 Z301ML (P00L) - experimental";
++	compatible = "asus,z301ml", "mediatek,mt6735";
++
++	aliases {
++		serial0 = &uart0;
++	};
++
++	chosen {
++		stdout-path = "serial0:921600n8";
++	};
++
++	/* Original ASUS DTB exposes this conservative initial RAM range. */
++	memory@40000000 {
++		device_type = "memory";
++		reg = <0 0x40000000 0 0x1f000000>;
++	};
++
++	reserved-memory {
++		ramoops@43f10000 {
++			compatible = "ramoops";
++			reg = <0 0x43f10000 0 0x000e0000>;
++			record-size = <0x00080000>;
++			console-size = <0x00010000>;
++			ftrace-size = <0x00020000>;
++			pmsg-size = <0x00010000>;
++		};
++	};
++};
++
++&uart0 {
++	status = "okay";
++};
++
++&mmc0 {
++	status = "okay";
++	bus-width = <8>;
++	max-frequency = <52000000>;
++	cap-mmc-highspeed;
++	non-removable;
++	/* PMIC-specific vmmc/vqmmc supplies have not been confirmed. */
++};
++
++/* Touchscreen, display, PMIC, Wi-Fi, audio, LTE and camera require
++ * separate hardware-specific integration.
++ */

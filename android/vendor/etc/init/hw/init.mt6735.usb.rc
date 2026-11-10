@@ -1,0 +1,46 @@
+# USB: configfs gadget g1 on musb. f1 = adb (managed by system init.usb.configfs.rc), f9 = ACM root console (ours).
+on init
+    setprop sys.usb.configfs 1
+    setprop sys.usb.controller "musb-hdrc.4.auto"
+    mkdir /config/usb_gadget/g1 0770 shell shell
+    write /config/usb_gadget/g1/idVendor 0x1d6b
+    write /config/usb_gadget/g1/idProduct 0x0104
+    write /config/usb_gadget/g1/bcdUSB 0x0200
+    write /config/usb_gadget/g1/bDeviceClass 0xEF
+    write /config/usb_gadget/g1/bDeviceSubClass 0x02
+    write /config/usb_gadget/g1/bDeviceProtocol 0x01
+    mkdir /config/usb_gadget/g1/strings/0x409 0770 shell shell
+    write /config/usb_gadget/g1/strings/0x409/serialnumber "P00L-LINUX7-TEST"
+    write /config/usb_gadget/g1/strings/0x409/manufacturer "ASUS P00L kernel diagnostic"
+    write /config/usb_gadget/g1/strings/0x409/product "Z301ML ACM ECM RNDIS"
+    mkdir /config/usb_gadget/g1/configs/b.1 0770 shell shell
+    mkdir /config/usb_gadget/g1/configs/b.1/strings/0x409 0770 shell shell
+    write /config/usb_gadget/g1/configs/b.1/strings/0x409/configuration "acm"
+    write /config/usb_gadget/g1/configs/b.1/MaxPower 100
+    mkdir /config/usb_gadget/g1/functions/acm.gs0
+    mkdir /config/usb_gadget/g1/functions/ffs.adb
+    symlink /config/usb_gadget/g1/functions/acm.gs0 /config/usb_gadget/g1/configs/b.1/f9
+    mkdir /dev/usb-ffs 0775 shell shell
+    mkdir /dev/usb-ffs/adb 0770 shell shell
+    mount functionfs adb /dev/usb-ffs/adb uid=2000,gid=2000
+    # bind with ACM only, so the root console exists before adbd
+    write /config/usb_gadget/g1/UDC ${sys.usb.controller}
+    start rootcon
+
+service rootcon /vendor/bin/rootcon.sh
+    user root
+    group root shell log system
+    seclabel u:r:shell:s0
+    disabled
+
+# adbd's FunctionFS is ready: unbind first (this file is imported before init.usb.configfs.rc,
+# so this runs before the system trigger that links f1 and rebinds UDC).
+on property:sys.usb.ffs.ready=1 && property:sys.usb.config=adb && property:sys.usb.configfs=1
+    exec u:r:shell:s0 root root -- /vendor/bin/usb_adb.sh
+
+on property:sys.usb.config=none && property:sys.usb.configfs=1
+    symlink /config/usb_gadget/g1/functions/acm.gs0 /config/usb_gadget/g1/configs/b.1/f9
+    write /config/usb_gadget/g1/UDC ${sys.usb.controller}
+
+on boot
+    setprop sys.usb.config adb

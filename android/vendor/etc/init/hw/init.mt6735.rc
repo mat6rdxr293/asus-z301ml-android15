@@ -1,0 +1,138 @@
+# Z301ML (MT8735) vendor init for Android 15 GSI bring-up
+import /vendor/etc/init/hw/init.mt6735.usb.rc
+
+on early-init
+    # mainline kernel has no ashmem; system init.rc sets this false, we run later
+    setprop sys.use_memfd true
+    write /sys/power/wake_lock z301ml_bringup
+    write /proc/sys/kernel/printk "7 4 1 7"
+    write /proc/sys/kernel/dmesg_restrict 0
+    # fbcon draws every console message in software (~10 ms/line, rotated); kernel log floods
+    # then stall the CPU and the display pipeline. Android owns the panel: unbind fbcon from the VT.
+    write /sys/class/vtconsole/vtcon1/bind 0
+
+on init
+    setprop sys.use_memfd true
+    # GSI keystore2 needs a TEE KeyMint: give it km_compat's software KeyMint for TEE (patched cbz -> b)
+    mount none /vendor/etc/patches/libkm_compat.so /system/lib64/libkm_compat.so bind
+    # cpufreq: schedutil everywhere
+    write /sys/devices/system/cpu/cpufreq/policy0/scaling_governor schedutil
+
+on fs
+    mount_all /vendor/etc/fstab.mt6735 --early
+    mkdir /data/vendor 0771 root root
+    mkdir /data/vendor/log 0777 root root
+    start vdmesg
+    start vlogcat
+    start autoreboot
+    start vdiag
+
+on late-fs
+    mount_all /vendor/etc/fstab.mt6735 --late
+
+on post-fs-data
+    mkdir /data/vendor 0771 root root
+
+# bring-up logging to /data (read back from rescue Linux)
+service vlogcat /system/bin/logcat -b all -v threadtime -f /data/vendor/log/logcat.txt -r 8192 -n 4
+    user root
+    group root log
+    seclabel u:r:shell:s0
+    disabled
+
+service vdmesg /vendor/bin/busybox sh -c "/vendor/bin/busybox dmesg > /data/vendor/log/dmesg-early.txt; exec /vendor/bin/busybox cat /proc/kmsg > /data/vendor/log/dmesg.txt"
+    user root
+    group root
+    seclabel u:r:shell:s0
+    disabled
+
+# GPU: Mali-T720 via panfrost (card1/renderD129) for Mesa EGL; must be up before SurfaceFlinger
+# (class core, started on boot). To go back to CPU rendering set ro.hardware.egl=angle in build.prop.
+on post-fs
+    insmod /vendor/lib/modules/drm_shmem_helper.ko
+    insmod /vendor/lib/modules/gpu-sched.ko
+    insmod /vendor/lib/modules/panfrost.ko
+    wait /dev/dri/renderD129 5
+    # Sound: AFE + MT6328 codec + machine card "z301ml-mt6328" (card 0: DL1 = device 0)
+    insmod /vendor/lib/modules/snd-soc-mtk-common.ko
+    insmod /vendor/lib/modules/snd-soc-mt6735-afe.ko
+    insmod /vendor/lib/modules/snd-soc-mt6328.ko
+    insmod /vendor/lib/modules/mt6735-mt6328.ko
+    wait /dev/snd/controlC0 5
+    exec u:r:shell:s0 root root -- /vendor/bin/z301_audio.sh
+
+on boot
+    chmod 0666 /dev/dri/card0
+    chmod 0666 /dev/dri/renderD128
+    chmod 0666 /dev/dri/card1
+    chmod 0666 /dev/dri/renderD129
+    write /sys/class/backlight/backlight/brightness 120
+
+on property:sys.boot_completed=1
+    write /dev/kmsg "Z301ML: sys.boot_completed=1"
+
+# bring-up safety net: return to rescue Linux (BCB is re-armed by pre-init) after 7 min
+# unless /data/vendor/keep exists (create it from adb/root console to stay in Android)
+service autoreboot /vendor/bin/busybox sh -c "/vendor/bin/busybox sleep 420; [ -e /data/vendor/keep ] && exit 0; echo Z301ML-autoreboot > /dev/kmsg; /vendor/bin/busybox sync; /system/bin/setprop sys.powerctl reboot; /vendor/bin/busybox sleep 20; /vendor/bin/busybox reboot -f"
+    user root
+    group root
+    seclabel u:r:shell:s0
+    oneshot
+    disabled
+
+service vdiag /vendor/bin/diag.sh
+    user root
+    group root shell log system readproc
+    seclabel u:r:shell:s0
+    oneshot
+    disabled
+
+# system init.rc forces sys.use_memfd=false in post-fs-data; mainline kernel has no ashmem
+on property:sys.use_memfd=false
+    setprop sys.use_memfd true
+
+# Bluetooth: MT6735 connsys over STP -> hci0 (btmtkstp) -> Cuttlefish btlinux HAL (HCI user channel)
+service z301_bt /vendor/bin/z301_bt.sh
+    user root
+    group root
+    seclabel u:r:shell:s0
+    disabled
+
+on post-fs-data
+    # Wi-Fi (MTK wlan gen2 + Cuttlefish wifi HAL / wpa_supplicant APEXes)
+    mkdir /data/vendor/wifi 0771 wifi wifi
+    mkdir /data/vendor/wifi/wpa 0770 wifi wifi
+    mkdir /data/vendor/wifi/wpa/sockets 0770 wifi wifi
+    start z301_bt
+
+# Cuttlefish-only helpers in com.google.cf.bt: virtio BT forwarder and the socket offload HAL
+# (not in VINTF) crash-loop here and trip flags_health_check; stop them on their first exit
+on property:init.svc.bt_vhci_forwarder=restarting
+    stop bt_vhci_forwarder
+
+on property:init.svc.bt_socket=restarting
+    stop bt_socket
+
+# Display: after the LK -> kernel handover the panel slowly develops column bands until the
+# display path has been powered down and up once (screen-off/on is always clean). Do one
+# off/on cycle as soon as Android is up. TODO: fix the DSI/MIPI-TX takeover in the kernel.
+service z301_dispcycle /system/bin/sh -c "[ -e /data/vendor/no_dispcycle ] && exit 0; /system/bin/input keyevent 26; /vendor/bin/busybox sleep 3; /system/bin/input keyevent 224"
+    user root
+    group root input
+    seclabel u:r:shell:s0
+    oneshot
+    disabled
+
+on property:sys.boot_completed=1
+    start z301_dispcycle
+
+# GPU bring-up report (readable from rescue Linux even if adb is down)
+service z301_gpudiag /system/bin/sh -c "/vendor/bin/busybox sleep 20; { getprop | grep -iE 'egl|hwui|renderengine|vendor_name'; dumpsys SurfaceFlinger | grep -iE -A2 'GLES|renderer'; /vendor/bin/busybox grep -iE 'libEGL|mesa|panfrost|gallium|Loader' /data/vendor/log/logcat.txt* | grep -v 'ANGLE Warn' | /vendor/bin/busybox head -80; cat /sys/kernel/debug/dri/1/name 2>/dev/null; } > /data/vendor/log/gpu.txt 2>&1"
+    user root
+    group root shell log graphics
+    seclabel u:r:shell:s0
+    oneshot
+    disabled
+
+on property:sys.boot_completed=1
+    start z301_gpudiag

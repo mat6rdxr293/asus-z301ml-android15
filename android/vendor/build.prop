@@ -1,0 +1,65 @@
+# Z301ML (P00L) homemade vendor for Android 15 GSI
+ro.vendor.build.version.sdk=35
+ro.vendor.build.version.release=15
+ro.vendor.build.type=userdebug
+ro.vendor.build.fingerprint=Android/aosp_arm64/generic_arm64:15/BP11.241210.004/12926906:user/release-keys
+ro.product.vendor.brand=asus
+ro.product.vendor.device=P00L
+ro.product.vendor.manufacturer=asus
+ro.product.vendor.model=ZenPad 10 Z301ML
+ro.product.vendor.name=P00L
+ro.vendor.product.cpu.abilist=arm64-v8a
+ro.vendor.product.cpu.abilist32=
+ro.vendor.product.cpu.abilist64=arm64-v8a
+ro.board.platform=mt6735
+ro.board.first_api_level=35
+ro.board.api_level=202404
+ro.product.first_api_level=35
+ro.zygote=zygote64
+ro.sf.lcd_density=160
+ro.secure=0
+ro.adb.secure=0
+ro.debuggable=1
+persist.sys.usb.config=adb
+ro.crypto.state=unencrypted
+ro.config.low_ram=false
+dalvik.vm.heapsize=256m
+dalvik.vm.heapgrowthlimit=128m
+ro.vendor.build.security_patch=2025-01-05
+ro.vendor.boot_security_patch=2025-01-05
+# graphics: Cuttlefish drm_hwcomposer + minigbm; GLES = Mesa 25.0.7 panfrost on Mali-T720 (GLES 2.0 only),
+# Vulkan = SwiftShader (pastel) kept for apps but HWUI/RenderEngine forced to GL
+ro.hardware.egl=mesa
+drm.gpu.vendor_name=panfrost
+ro.hardware.vulkan=pastel
+ro.hardware.gralloc=minigbm
+ro.hardware.hwcomposer=drm
+ro.cpuvulkan.version=4206592
+ro.opengles.version=131072
+ro.surface_flinger.running_without_sync_framework=true
+debug.sf.vsync_reactor_ignore_present_fences=true
+ro.hwui.use_vulkan=false
+debug.hwui.renderer=skiagl
+debug.renderengine.backend=skiaglthreaded
+ro.surface_flinger.supports_background_blur=0
+# mainline kernel has no ashmem: use memfd
+sys.use_memfd=true
+# Wi-Fi
+wifi.interface=wlan0
+wifi.direct.interface=p2p0
+# Bluetooth profiles (classic, BT 4.x CONNSYS; no LE Audio). Without these only GATT runs and
+# paired phones/headsets have nothing to connect to.
+bluetooth.profile.gatt.enabled=true
+bluetooth.profile.bas.client.enabled=true
+bluetooth.profile.a2dp.source.enabled=true
+bluetooth.profile.avrcp.target.enabled=true
+bluetooth.profile.hfp.ag.enabled=true
+bluetooth.profile.hid.host.enabled=true
+bluetooth.profile.opp.enabled=true
+bluetooth.profile.pan.nap.enabled=true
+bluetooth.profile.pan.panu.enabled=true
+bluetooth.profile.pbap.server.enabled=true
+bluetooth.profile.map.server.enabled=true
+# Mesa panfrost: force linear textures. The tiled->linear conversion in panfrost_ptr_unmap wrote
+# through a stale BO mapping and crashed WebView (YouTube) in glTexSubImage2D.
+debug.mesa.pan.mesa.debug=linear

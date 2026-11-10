@@ -1,0 +1,5 @@
+# Z301ML: no ashmem in the mainline kernel, so libcutils uses memfd (sys.use_memfd=true);
+# the APEX mediaextractor policy lacks the memfd syscalls -> SIGSYS on the first shared buffer.
+memfd_create: 1
+ftruncate: 1
+fcntl: 1

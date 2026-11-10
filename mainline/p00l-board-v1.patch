@@ -1,0 +1,72 @@
+diff --git a/arch/arm64/boot/dts/mediatek/Makefile b/arch/arm64/boot/dts/mediatek/Makefile
+index 0f7ea0390..f427658ea 100644
+--- a/arch/arm64/boot/dts/mediatek/Makefile
++++ b/arch/arm64/boot/dts/mediatek/Makefile
+@@ -182,3 +182,4 @@ DTC_FLAGS_mt7988a-bananapi-bpi-r4-2g5 := -@
+ DTC_FLAGS_mt7988a-bananapi-bpi-r4-pro-4e := -@
+ DTC_FLAGS_mt7988a-bananapi-bpi-r4-pro-8x := -@
+ DTC_FLAGS_mt8395-radxa-nio-12l := -@
++dtb-$(CONFIG_ARCH_MEDIATEK) += mt6735-asus-p00l.dtb
+diff --git a/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l.dts b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l.dts
+new file mode 100644
+index 000000000..6d0488eaa
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l.dts
+@@ -0,0 +1,57 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * ASUS ZenPad 10 Z301ML / P00L (asus8735_tb_301_n)
++ * EXPERIMENTAL MT6735 MAINLINE EARLY BRING-UP ONLY.
++ * Do not flash without validated power management and recovery procedure.
++ */
++
++/dts-v1/;
++
++#include "mt6735.dtsi"
++
++/ {
++	model = "ASUS ZenPad 10 Z301ML (P00L) - experimental";
++	compatible = "asus,z301ml", "mediatek,mt6735";
++
++	aliases {
++		serial0 = &uart0;
++	};
++
++	chosen {
++		stdout-path = "serial0:921600n8";
++	};
++
++	/* Original ASUS DTB exposes this conservative initial RAM range. */
++	memory@40000000 {
++		device_type = "memory";
++		reg = <0 0x40000000 0 0x1f000000>;
++	};
++
++	reserved-memory {
++		ramoops@43f10000 {
++			compatible = "ramoops";
++			reg = <0 0x43f10000 0 0x000e0000>;
++			record-size = <0x00080000>;
++			console-size = <0x00010000>;
++			ftrace-size = <0x00020000>;
++			pmsg-size = <0x00010000>;
++		};
++	};
++};
++
++&uart0 {
++	status = "okay";
++};
++
++&mmc0 {
++	status = "okay";
++	bus-width = <8>;
++	max-frequency = <52000000>;
++	cap-mmc-highspeed;
++	non-removable;
++	/* PMIC-specific vmmc/vqmmc supplies have not been confirmed. */
++};
++
++/* Touchscreen, display, PMIC, Wi-Fi, audio, LTE and camera require
++ * separate hardware-specific integration.
++ */

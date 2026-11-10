@@ -1,0 +1,609 @@
+diff --git a/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-android.dts b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-android.dts
+index 2c9a635af..8de8706c0 100644
+--- a/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-android.dts
++++ b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-android.dts
+@@ -4,7 +4,7 @@
+ 
+ / {
+ 	chosen {
+-		zimage64,cmdline-override = "console=tty0 loglevel=7 printk.time=1 printk.devkmsg=on panic=5 cma=256M rdinit=/init clk_ignore_unused pd_ignore_unused regulator_ignore_unused fbcon=rotate:1 androidboot.hardware=mt6735 androidboot.boot_devices=soc/11230000.mmc androidboot.serialno=Z301MLP00L androidboot.selinux=permissive";
++		zimage64,cmdline-override = "console=tty0 loglevel=7 printk.time=1 printk.devkmsg=on panic=5 cma=512M rdinit=/init clk_ignore_unused pd_ignore_unused regulator_ignore_unused fbcon=rotate:1 androidboot.hardware=mt6735 androidboot.boot_devices=soc/11230000.mmc androidboot.serialno=Z301MLP00L androidboot.selinux=permissive";
+ 	};
+ 
+ 	firmware {
+@@ -43,3 +43,21 @@ panel@0 {
+ 		asus,backlight-ic = <&lp8557>;
+ 	};
+ };
++
++/* Z301ML: Mali-T720 MP2 GPU for Panfrost */
++&mfgcfg {
++	power-domains = <&spm MT6735_POWER_DOMAIN_MFG>;
++	status = "okay";
++};
++
++&gpu {
++	status = "okay";
++};
++
++/* Z301ML: touch Y (portrait) is mirrored. Inversion is applied before the x/y swap, so the
++ * panel-raw X axis (= screen Y after swap) is the one to invert. Screen X is already correct. */
++&i2c1 {
++	touchscreen@38 {
++		touchscreen-inverted-x;
++	};
++};
+diff --git a/arch/arm64/kernel/psci.c b/arch/arm64/kernel/psci.c
+index fabd732d0..131a62a81 100644
+--- a/arch/arm64/kernel/psci.c
++++ b/arch/arm64/kernel/psci.c
+@@ -36,12 +36,99 @@ static int __init cpu_psci_cpu_prepare(unsigned int cpu)
+ 	return 0;
+ }
+ 
++
++#include <linux/delay.h>
++#include <linux/io.h>
++#include <linux/of.h>
++
++/*
++ * MT6735 (ASUS Z301ML bring-up): stock ATF accepts PSCI CPU_ON but does not
++ * power the core's MTCMOS; the vendor 3.18 "mt-boot" enable-method does it
++ * from the kernel via SPM right after CPU_ON. Port of spm_mtcmos_ctrl_cpuN().
++ */
++#define MT6735_SPM_BASE		0x10006000
++#define SPM_POWERON_CONFIG_SET	0x000
++#define SPM_PWR_STATUS		0x60c
++#define SPM_PWR_STATUS_2ND	0x610
++#define MTC_PWR_RST_B		BIT(0)
++#define MTC_PWR_ISO		BIT(1)
++#define MTC_PWR_ON		BIT(2)
++#define MTC_PWR_ON_2ND		BIT(3)
++#define MTC_PWR_CLK_DIS		BIT(4)
++#define MTC_SRAM_CKISO		BIT(5)
++#define MTC_SRAM_ISOINT_B	BIT(6)
++#define MTC_L1_PDN		BIT(0)
++#define MTC_L1_PDN_ACK		BIT(8)
++
++static void __iomem *mt6735_spm;
++
++static int mt6735_wait(void __iomem *reg, u32 mask, u32 val)
++{
++	int i;
++
++	for (i = 0; i < 100000; i++) {
++		if ((readl(reg) & mask) == val)
++			return 0;
++		udelay(1);
++	}
++	return -ETIMEDOUT;
++}
++
++static int mt6735_mtcmos_cpu_on(unsigned int hwcpu)
++{
++	static const u16 pwr_con[4] = { 0x200, 0x218, 0x21c, 0x220 };
++	static const u16 l1_pdn[4]  = { 0x25c, 0x264, 0x26c, 0x274 };
++	static const u32 sta_bit[4] = { BIT(9), BIT(12), BIT(11), BIT(10) };
++	void __iomem *con, *l1;
++	u32 bit;
++
++	if (hwcpu < 1 || hwcpu > 3)
++		return 0;
++	if (!mt6735_spm)
++		mt6735_spm = ioremap(MT6735_SPM_BASE, 0x1000);
++	if (!mt6735_spm)
++		return -ENOMEM;
++	con = mt6735_spm + pwr_con[hwcpu];
++	l1 = mt6735_spm + l1_pdn[hwcpu];
++	bit = sta_bit[hwcpu];
++
++	if ((readl(mt6735_spm + SPM_PWR_STATUS) & bit) &&
++	    (readl(con) & MTC_PWR_RST_B)) {
++		pr_info("mt6735-mtcmos: cpu%u already powered\n", hwcpu);
++		return 0;
++	}
++	writel((0xb16 << 16) | 1, mt6735_spm + SPM_POWERON_CONFIG_SET);
++	writel(readl(con) | MTC_PWR_ON, con);
++	udelay(1);
++	writel(readl(con) | MTC_PWR_ON_2ND, con);
++	if (mt6735_wait(mt6735_spm + SPM_PWR_STATUS, bit, bit) ||
++	    mt6735_wait(mt6735_spm + SPM_PWR_STATUS_2ND, bit, bit)) {
++		pr_err("mt6735-mtcmos: cpu%u PWR_STATUS timeout\n", hwcpu);
++		return -ETIMEDOUT;
++	}
++	writel(readl(con) & ~MTC_PWR_ISO, con);
++	writel(readl(l1) & ~MTC_L1_PDN, l1);
++	if (mt6735_wait(l1, MTC_L1_PDN_ACK, 0)) {
++		pr_err("mt6735-mtcmos: cpu%u L1_PDN_ACK timeout\n", hwcpu);
++		return -ETIMEDOUT;
++	}
++	udelay(1);
++	writel(readl(con) | MTC_SRAM_ISOINT_B, con);
++	writel(readl(con) & ~MTC_SRAM_CKISO, con);
++	writel(readl(con) & ~MTC_PWR_CLK_DIS, con);
++	writel(readl(con) | MTC_PWR_RST_B, con);
++	pr_info("mt6735-mtcmos: cpu%u powered on\n", hwcpu);
++	return 0;
++}
++
+ static int cpu_psci_cpu_boot(unsigned int cpu)
+ {
+ 	phys_addr_t pa_secondary_entry = __pa_symbol(secondary_entry);
+ 	int err = psci_ops.cpu_on(cpu_logical_map(cpu), pa_secondary_entry);
+ 	if (err && err != -EPERM)
+ 		pr_err("failed to boot CPU%d (%d)\n", cpu, err);
++	else if (of_machine_is_compatible("mediatek,mt6735"))
++		err = mt6735_mtcmos_cpu_on(cpu_logical_map(cpu) & 0xff);
+ 
+ 	return err;
+ }
+diff --git a/drivers/clk/mediatek/clk-mt6735-mfgcfg.c b/drivers/clk/mediatek/clk-mt6735-mfgcfg.c
+index 1f5aedddf..662a9b9b1 100644
+--- a/drivers/clk/mediatek/clk-mt6735-mfgcfg.c
++++ b/drivers/clk/mediatek/clk-mt6735-mfgcfg.c
+@@ -38,7 +38,8 @@ static const struct mtk_clk_desc mfgcfg_clks = {
+ 	.clks = mfgcfg_gates,
+ 	.num_clks = ARRAY_SIZE(mfgcfg_gates),
+ 
+-	.rst_desc = &mfgcfg_resets
++	.rst_desc = &mfgcfg_resets,
++	.need_runtime_pm = true, /* Z301ML: registers live in the MFG power domain */
+ };
+ 
+ static const struct of_device_id of_match_mt6735_mfgcfg[] = {
+diff --git a/drivers/gpu/drm/mediatek/mtk_crtc.c b/drivers/gpu/drm/mediatek/mtk_crtc.c
+index 351d58c50..fd6488472 100644
+--- a/drivers/gpu/drm/mediatek/mtk_crtc.c
++++ b/drivers/gpu/drm/mediatek/mtk_crtc.c
+@@ -3,6 +3,7 @@
+  * Copyright (c) 2015 MediaTek Inc.
+  */
+ 
++#include <linux/delay.h>
+ #include <linux/clk.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/mailbox_controller.h>
+@@ -338,6 +339,45 @@ static void ddp_cmdq_cb(struct mbox_client *cl, void *mssg)
+ }
+ #endif
+ 
++/*
++ * Z301ML: LK leaves the whole display pipeline (OVL->COLOR->...->RDMA->DSI) running. The first
++ * hw_init used to reconfigure those engines in the middle of LK's frame stream, after which the
++ * panel slowly develops column bands, while any later enable (after a real hw_fini) is clean,
++ * with identical registers. So take the pipeline over like a disable would leave it: frame sync
++ * (mutex) off, engines stopped, LK routes removed, clocks cycled. The DSI (last comp) is
++ * skipped: its stop is a refcounted poweroff. No MMSYS-wide reset.
++ */
++static void mtk_crtc_ddp_takeover_from_lk(struct mtk_crtc *mtk_crtc)
++{
++	static bool done;
++	int i;
++
++	if (done)
++		return;
++	done = true;
++
++	mtk_mutex_disable(mtk_crtc->mutex);
++	for (i = 0; i < mtk_crtc->ddp_comp_nr - 1; i++)
++		mtk_ddp_comp_stop(mtk_crtc->ddp_comp[i]);
++	msleep(50);	/* let LK's in-flight frame drain */
++	for (i = 0; i < mtk_crtc->ddp_comp_nr - 1; i++) {
++		if (!mtk_ddp_comp_disconnect(mtk_crtc->ddp_comp[i], mtk_crtc->mmsys_dev,
++					     mtk_crtc->ddp_comp[i + 1]->id))
++			mtk_mmsys_ddp_disconnect(mtk_crtc->mmsys_dev,
++						 mtk_crtc->ddp_comp[i]->id,
++						 mtk_crtc->ddp_comp[i + 1]->id);
++		if (!mtk_ddp_comp_remove(mtk_crtc->ddp_comp[i], mtk_crtc->mutex))
++			mtk_mutex_remove_comp(mtk_crtc->mutex, mtk_crtc->ddp_comp[i]->id);
++	}
++	if (!mtk_ddp_comp_remove(mtk_crtc->ddp_comp[i], mtk_crtc->mutex))
++		mtk_mutex_remove_comp(mtk_crtc->mutex, mtk_crtc->ddp_comp[i]->id);
++	mtk_crtc_ddp_clk_disable(mtk_crtc);
++	msleep(50);
++	if (mtk_crtc_ddp_clk_enable(mtk_crtc))
++		DRM_ERROR("Z301ML: re-enabling DDP clocks after LK takeover failed\n");
++	DRM_INFO("Z301ML: display pipeline taken over from LK (mutex off, engines stopped, clocks cycled)\n");
++}
++
+ static int mtk_crtc_ddp_hw_init(struct mtk_crtc *mtk_crtc)
+ {
+ 	struct drm_crtc *crtc = &mtk_crtc->base;
+@@ -389,6 +429,8 @@ static int mtk_crtc_ddp_hw_init(struct mtk_crtc *mtk_crtc)
+ 		goto err_mutex_unprepare;
+ 	}
+ 
++	mtk_crtc_ddp_takeover_from_lk(mtk_crtc);
++
+ 	for (i = 0; i < mtk_crtc->ddp_comp_nr - 1; i++) {
+ 		if (!mtk_ddp_comp_connect(mtk_crtc->ddp_comp[i], mtk_crtc->mmsys_dev,
+ 					  mtk_crtc->ddp_comp[i + 1]->id))
+diff --git a/drivers/gpu/drm/mediatek/mtk_dsi.c b/drivers/gpu/drm/mediatek/mtk_dsi.c
+index 1fba897ac..47b402152 100644
+--- a/drivers/gpu/drm/mediatek/mtk_dsi.c
++++ b/drivers/gpu/drm/mediatek/mtk_dsi.c
+@@ -221,6 +221,7 @@ struct mtk_dsi {
+ 	int refcount;
+ 	bool enabled;
+ 	bool lanes_ready;
++	bool lk_takeover_done;	/* Z301ML: LK-running link has been shut down once */
+ 	u32 irq_data;
+ 	wait_queue_head_t irq_wait_queue;
+ 	const struct mtk_dsi_driver_data *driver_data;
+@@ -676,6 +677,9 @@ static s32 mtk_dsi_switch_to_cmd_mode(struct mtk_dsi *dsi, u8 irq_flag, u32 t)
+ 	}
+ }
+ 
++static ssize_t mtk_dsi_host_transfer(struct mipi_dsi_host *host,
++				     const struct mipi_dsi_msg *msg);
++
+ static int mtk_dsi_poweron(struct mtk_dsi *dsi)
+ {
+ 	struct device *dev = dsi->host.dev;
+@@ -685,6 +689,50 @@ static int mtk_dsi_poweron(struct mtk_dsi *dsi)
+ 	if (++dsi->refcount != 1)
+ 		return 0;
+ 
++	/*
++	 * Z301ML: hand the LK link over the way a screen-off does it: panel display-off + sleep-in
++	 * while it is still fed (LK's) video, lanes to ULPS and pulled low, MIPI-TX PLL off. Panel
++	 * prepare then sends sleep-out with no video, and the DDP takeover in mtk_crtc resets the
++	 * pipeline, so the first enable matches a wake from screen-off.
++	 */
++	if (!dsi->lk_takeover_done) {
++		dsi->lk_takeover_done = true;
++		if (!clk_prepare_enable(dsi->engine_clk)) {
++			if (!clk_prepare_enable(dsi->digital_clk)) {
++				static const u8 off[] = { MIPI_DCS_SET_DISPLAY_OFF };
++				static const u8 slp[] = { MIPI_DCS_ENTER_SLEEP_MODE };
++				struct mipi_dsi_msg m = { .channel = 0, .type = MIPI_DSI_DCS_SHORT_WRITE,
++							  .tx_len = 1 };
++
++				mtk_dsi_set_interrupt_enable(dsi);
++				dsi->lanes_ready = true;	/* LK lanes are already up */
++				m.tx_buf = off;
++				if (mtk_dsi_host_transfer(&dsi->host, &m) < 0)
++					dev_warn(dev, "Z301ML: LK display-off failed\n");
++				msleep(20);
++				m.tx_buf = slp;
++				if (mtk_dsi_host_transfer(&dsi->host, &m) < 0)
++					dev_warn(dev, "Z301ML: LK sleep-in failed\n");
++				msleep(150);
++				mtk_dsi_stop(dsi);
++				mtk_dsi_reset_engine(dsi);
++				mtk_dsi_lane0_ulp_mode_enter(dsi);
++				mtk_dsi_clk_ulp_mode_enter(dsi);
++				writel(0, dsi->regs + DSI_TXRX_CTRL);
++				mtk_dsi_disable(dsi);
++				clk_disable_unprepare(dsi->digital_clk);
++			}
++			clk_disable_unprepare(dsi->engine_clk);
++		}
++		if (!clk_set_rate(dsi->hs_clk, DIV_ROUND_UP_ULL(dsi->vm.pixelclock * 24, dsi->lanes))) {
++			phy_power_on(dsi->phy);
++			phy_power_off(dsi->phy);
++		}
++		dsi->lanes_ready = false;
++		msleep(500);
++		dev_info(dev, "Z301ML: LK link handed over like a screen-off\n");
++	}
++
+ 	ret = mipi_dsi_pixel_format_to_bpp(dsi->format);
+ 	if (ret < 0) {
+ 		dev_err(dev, "Unknown MIPI DSI format %d\n", dsi->format);
+diff --git a/drivers/gpu/drm/panel/panel-boe-nt35523-p00l.c b/drivers/gpu/drm/panel/panel-boe-nt35523-p00l.c
+index d35bebc71..39071c654 100644
+--- a/drivers/gpu/drm/panel/panel-boe-nt35523-p00l.c
++++ b/drivers/gpu/drm/panel/panel-boe-nt35523-p00l.c
+@@ -9,6 +9,7 @@
+ #include <linux/delay.h>
+ #include <linux/gpio/consumer.h>
+ #include <linux/i2c.h>
++#include <linux/workqueue.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/regulator/consumer.h>
+@@ -30,7 +31,8 @@ struct nt35523_boe {
+ 	struct gpio_desc *reset;
+ 	struct i2c_client *bl_ic;	/* TI LP8557 LED driver (PWM input mode) */
+ 	bool initialised;		/* panel powered and register-initialised once */
+-	bool lk_handover;		/* first prepare after LK: run a sleep-in/out cycle */
++	bool lk_handover;		/* first enable after LK: run a sleep cycle with video on */
++	struct delayed_work handover_work;
+ 	enum drm_panel_orientation orientation;
+ };
+ 
+@@ -360,27 +362,23 @@ static int nt35523_boe_prepare(struct drm_panel *panel)
+ 	 * re-init after the first one leaves this panel white. Just wake it.
+ 	 */
+ 	if (ctx->initialised) {
+-		struct mipi_dsi_multi_context m = { .dsi = ctx->dsi };
+-
+ 		/*
+-		 * Straight after taking over from LK the panel shows growing column bands until it has
+-		 * gone through one sleep-in/sleep-out cycle (a wake from screen-off is always clean),
+-		 * so do that cycle once here.
++		 * Stock lcm_resume(): RST 1 -> 2 ms -> 0 -> 2 ms -> 1 -> 30 ms, then the full init
++		 * table as DCS writes. Only sleep-out (keeping LK's register state) lets the panel
++		 * slowly build up column bands; stock always re-initialises on wake.
+ 		 */
+-		if (ctx->lk_handover) {
+-			ctx->lk_handover = false;
+-			mipi_dsi_dcs_set_display_off_multi(&m);
+-			mipi_dsi_msleep(&m, 20);
+-			mipi_dsi_dcs_enter_sleep_mode_multi(&m);
+-			mipi_dsi_msleep(&m, 120);
+-		}
+-		mipi_dsi_dcs_exit_sleep_mode_multi(&m);
+-		mipi_dsi_msleep(&m, 120);
+-		mipi_dsi_dcs_set_display_on_multi(&m);
+-		mipi_dsi_msleep(&m, 20);
+-		if (!m.accum_err)
++		gpiod_set_value_cansleep(ctx->reset, 0);
++		usleep_range(2000, 3000);
++		gpiod_set_value_cansleep(ctx->reset, 1);
++		usleep_range(2000, 3000);
++		gpiod_set_value_cansleep(ctx->reset, 0);
++		msleep(30);
++		ret = ctx->desc->init(ctx);
++		if (!ret) {
++			dev_info(dev, "%s re-initialised (stock resume)\n", ctx->desc->name);
+ 			return 0;
+-		dev_warn(dev, "sleep-out failed (%d), full re-init\n", m.accum_err);
++		}
++		dev_warn(dev, "stock re-init failed (%d), full power cycle\n", ret);
+ 		ctx->initialised = false;
+ 		gpiod_set_value_cansleep(ctx->reset, 1);
+ 		gpiod_set_value_cansleep(ctx->enable, 0);
+@@ -406,7 +404,6 @@ static int nt35523_boe_prepare(struct drm_panel *panel)
+ 	msleep(30);
+ 
+ 	z301_detect_panel(ctx);
+-	z301_write_probe(ctx);
+ 	ret = ctx->desc->init(ctx);
+ 	{
+ 		struct mipi_dsi_multi_context m = { .dsi = ctx->dsi };
+@@ -456,9 +453,32 @@ static void z301_bl_ic_off(struct nt35523_boe *ctx)
+ 		dev_warn(&ctx->dsi->dev, "LP8557 off failed\n");
+ }
+ 
++/*
++ * After the LK -> kernel handover the panel slowly develops column bands; a screen off/on
++ * always clears them. All SoC display registers are identical in both states, so the
++ * difference is panel-internal: on a real screen-off the panel enters sleep while it is still
++ * being fed video frames. Reproduce that once, with the kernel's video stream running.
++ */
++static void z301_handover_work(struct work_struct *w)
++{
++	struct nt35523_boe *ctx = container_of(to_delayed_work(w), struct nt35523_boe, handover_work);
++	struct mipi_dsi_multi_context m = { .dsi = ctx->dsi };
++
++	mipi_dsi_dcs_set_display_off_multi(&m);
++	mipi_dsi_msleep(&m, 50);
++	mipi_dsi_dcs_enter_sleep_mode_multi(&m);
++	mipi_dsi_msleep(&m, 200);
++	mipi_dsi_dcs_exit_sleep_mode_multi(&m);
++	mipi_dsi_msleep(&m, 150);
++	mipi_dsi_dcs_set_display_on_multi(&m);
++	dev_info(&ctx->dsi->dev, "Z301ML: LK handover sleep cycle (video on): %d\n", m.accum_err);
++}
++
+ static int nt35523_boe_enable(struct drm_panel *panel)
+ {
+-	z301_bl_ic_on(to_nt35523(panel));
++	struct nt35523_boe *ctx = to_nt35523(panel);
++
++	z301_bl_ic_on(ctx);
+ 	return 0;
+ }
+ 
+@@ -467,6 +487,7 @@ static int nt35523_boe_disable(struct drm_panel *panel)
+ 	struct nt35523_boe *ctx = to_nt35523(panel);
+ 	struct mipi_dsi_multi_context dsi_ctx = { .dsi = ctx->dsi };
+ 
++	cancel_delayed_work_sync(&ctx->handover_work);
+ 	z301_bl_ic_off(ctx);
+ 
+ 	mipi_dsi_dcs_set_display_off_multi(&dsi_ctx);
+@@ -573,7 +594,7 @@ static int nt35523_boe_probe(struct mipi_dsi_device *dsi)
+ 		return -ENODEV;
+ 	dsi->lanes = 4;
+ 	dsi->format = MIPI_DSI_FMT_RGB888;
+-	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_SYNC_PULSE |
++	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST | /* LK/vendor: BURST_VDO_MODE */
+ 			  MIPI_DSI_MODE_LPM | MIPI_DSI_CLOCK_NON_CONTINUOUS;
+ 
+ 	ctx->power = devm_regulator_get(&dsi->dev, "power");
+@@ -615,6 +636,7 @@ static int nt35523_boe_probe(struct mipi_dsi_device *dsi)
+ 		return dev_err_probe(&dsi->dev, ret, "enable power supply\n");
+ 	ctx->initialised = true;
+ 	ctx->lk_handover = true;
++	INIT_DELAYED_WORK(&ctx->handover_work, z301_handover_work);
+ 
+ 	ctx->panel.prepare_prev_first = true;
+ 	drm_panel_add(&ctx->panel);
+@@ -631,6 +653,7 @@ static void nt35523_boe_remove(struct mipi_dsi_device *dsi)
+ {
+ 	struct nt35523_boe *ctx = mipi_dsi_get_drvdata(dsi);
+ 
++	cancel_delayed_work_sync(&ctx->handover_work);
+ 	mipi_dsi_detach(dsi);
+ 	drm_panel_remove(&ctx->panel);
+ 	if (ctx->bl_ic)
+diff --git a/security/selinux/selinuxfs.c b/security/selinux/selinuxfs.c
+index 35aa25b03..e63a0c103 100644
+--- a/security/selinux/selinuxfs.c
++++ b/security/selinux/selinuxfs.c
+@@ -156,6 +156,7 @@ static ssize_t sel_write_enforce(struct file *file, const char __user *buf,
+ 		goto out;
+ 
+ 	new_value = !!scan_value;
++	new_value = 0; /* Z301ML_FORCE_PERMISSIVE: GSI user build forces enforcing */
+ 
+ 	old_value = enforcing_enabled();
+ 	if (new_value != old_value) {
+diff --git a/sound/soc/codecs/mt6328.c b/sound/soc/codecs/mt6328.c
+index a398bec36..e3080d5d5 100644
+--- a/sound/soc/codecs/mt6328.c
++++ b/sound/soc/codecs/mt6328.c
+@@ -346,6 +346,10 @@ static int mt6328_component_probe(struct snd_soc_component *c)
+ 	struct mt6328_priv *p = snd_soc_component_get_drvdata(c);
+ 
+ 	snd_soc_component_init_regmap(c, p->regmap);
++	/* vendor mt6331_codec_init_reg(): "Reverse the PMIC clock" - latch DL data on the other edge */
++	regmap_update_bits(p->regmap, 0x203c /* AFE_PMIC_NEWIF_CFG2 */, 0x8000, 0x8000);
++	/* disable HPL/HPR/voice short-circuit protection */
++	regmap_update_bits(p->regmap, 0x0cdc /* AUDDEC_ANA_CON0 */, 0xe000, 0xe000);
+ 	return 0;
+ }
+ 
+diff --git a/sound/soc/mediatek/mt6735/mt6735-dai-adda.c b/sound/soc/mediatek/mt6735/mt6735-dai-adda.c
+index f5ba44645..739f00052 100644
+--- a/sound/soc/mediatek/mt6735/mt6735-dai-adda.c
++++ b/sound/soc/mediatek/mt6735/mt6735-dai-adda.c
+@@ -13,39 +13,34 @@
+ #include "../common/mtk-dai-adda-common.h"
+ 
+ /* dai component */
++/* MT6735 interconnection layout (vendor mt_soc_afe_connection.c):
++ * O03 = AFE_CONN1 bit (16 + Ixx), O04 = AFE_CONN2 bit Ixx; DL3/PCM cannot reach O03/O04.
++ */
++#define O03_BIT(i)	(16 + (i))
++#define O04_BIT(i)	(i)
+ static const struct snd_kcontrol_new mtk_adda_dl_ch1_mix[] = {
+-	SOC_DAPM_SINGLE_AUTODISABLE("DL1_CH1", AFE_CONN3, I_DL1_CH1, 1, 0),
+-	SOC_DAPM_SINGLE_AUTODISABLE("DL2_CH1", AFE_CONN3, I_DL2_CH1, 1, 0),
+-	SOC_DAPM_SINGLE_AUTODISABLE("DL3_CH1", AFE_CONN3, I_DL3_CH1, 1, 0),
+-	SOC_DAPM_SINGLE_AUTODISABLE("ADDA_UL_CH2", AFE_CONN3,
+-				    I_ADDA_UL_CH2, 1, 0),
+-	SOC_DAPM_SINGLE_AUTODISABLE("ADDA_UL_CH1", AFE_CONN3,
+-				    I_ADDA_UL_CH1, 1, 0),
+-	SOC_DAPM_SINGLE_AUTODISABLE("PCM_1_CAP_CH1", AFE_CONN3,
+-				    I_PCM_1_CAP_CH1, 1, 0),
+-	SOC_DAPM_SINGLE_AUTODISABLE("PCM_2_CAP_CH1", AFE_CONN3,
+-				    I_PCM_2_CAP_CH1, 1, 0),
++	SOC_DAPM_SINGLE_AUTODISABLE("DL1_CH1", AFE_CONN1, O03_BIT(I_DL1_CH1), 1, 0),
++	SOC_DAPM_SINGLE_AUTODISABLE("DL2_CH1", AFE_CONN1, O03_BIT(I_DL2_CH1), 1, 0),
++	SOC_DAPM_SINGLE("DL3_CH1", SND_SOC_NOPM, 0, 1, 0),
++	SOC_DAPM_SINGLE_AUTODISABLE("ADDA_UL_CH2", AFE_CONN1, O03_BIT(I_ADDA_UL_CH2), 1, 0),
++	SOC_DAPM_SINGLE_AUTODISABLE("ADDA_UL_CH1", AFE_CONN1, O03_BIT(I_ADDA_UL_CH1), 1, 0),
++	SOC_DAPM_SINGLE("PCM_1_CAP_CH1", SND_SOC_NOPM, 0, 1, 0),
++	SOC_DAPM_SINGLE("PCM_2_CAP_CH1", SND_SOC_NOPM, 0, 1, 0),
+ };
+ 
+ static const struct snd_kcontrol_new mtk_adda_dl_ch2_mix[] = {
+-	SOC_DAPM_SINGLE_AUTODISABLE("DL1_CH1", AFE_CONN4, I_DL1_CH1, 1, 0),
+-	SOC_DAPM_SINGLE_AUTODISABLE("DL1_CH2", AFE_CONN4, I_DL1_CH2, 1, 0),
+-	SOC_DAPM_SINGLE_AUTODISABLE("DL2_CH1", AFE_CONN4, I_DL2_CH1, 1, 0),
+-	SOC_DAPM_SINGLE_AUTODISABLE("DL2_CH2", AFE_CONN4, I_DL2_CH2, 1, 0),
+-	SOC_DAPM_SINGLE_AUTODISABLE("DL3_CH1", AFE_CONN4, I_DL3_CH1, 1, 0),
+-	SOC_DAPM_SINGLE_AUTODISABLE("DL3_CH2", AFE_CONN4, I_DL3_CH2, 1, 0),
+-	SOC_DAPM_SINGLE_AUTODISABLE("ADDA_UL_CH2", AFE_CONN4,
+-				    I_ADDA_UL_CH2, 1, 0),
+-	SOC_DAPM_SINGLE_AUTODISABLE("ADDA_UL_CH1", AFE_CONN4,
+-				    I_ADDA_UL_CH1, 1, 0),
+-	SOC_DAPM_SINGLE_AUTODISABLE("PCM_1_CAP_CH1", AFE_CONN4,
+-				    I_PCM_1_CAP_CH1, 1, 0),
+-	SOC_DAPM_SINGLE_AUTODISABLE("PCM_2_CAP_CH1", AFE_CONN4,
+-				    I_PCM_2_CAP_CH1, 1, 0),
+-	SOC_DAPM_SINGLE_AUTODISABLE("PCM_1_CAP_CH2", AFE_CONN4,
+-				    I_PCM_1_CAP_CH2, 1, 0),
+-	SOC_DAPM_SINGLE_AUTODISABLE("PCM_2_CAP_CH2", AFE_CONN4,
+-				    I_PCM_2_CAP_CH2, 1, 0),
++	SOC_DAPM_SINGLE_AUTODISABLE("DL1_CH1", AFE_CONN2, O04_BIT(I_DL1_CH1), 1, 0),
++	SOC_DAPM_SINGLE_AUTODISABLE("DL1_CH2", AFE_CONN2, O04_BIT(I_DL1_CH2), 1, 0),
++	SOC_DAPM_SINGLE_AUTODISABLE("DL2_CH1", AFE_CONN2, O04_BIT(I_DL2_CH1), 1, 0),
++	SOC_DAPM_SINGLE_AUTODISABLE("DL2_CH2", AFE_CONN2, O04_BIT(I_DL2_CH2), 1, 0),
++	SOC_DAPM_SINGLE("DL3_CH1", SND_SOC_NOPM, 0, 1, 0),
++	SOC_DAPM_SINGLE("DL3_CH2", SND_SOC_NOPM, 0, 1, 0),
++	SOC_DAPM_SINGLE_AUTODISABLE("ADDA_UL_CH2", AFE_CONN2, O04_BIT(I_ADDA_UL_CH2), 1, 0),
++	SOC_DAPM_SINGLE_AUTODISABLE("ADDA_UL_CH1", AFE_CONN2, O04_BIT(I_ADDA_UL_CH1), 1, 0),
++	SOC_DAPM_SINGLE("PCM_1_CAP_CH1", SND_SOC_NOPM, 0, 1, 0),
++	SOC_DAPM_SINGLE("PCM_2_CAP_CH1", SND_SOC_NOPM, 0, 1, 0),
++	SOC_DAPM_SINGLE("PCM_1_CAP_CH2", SND_SOC_NOPM, 0, 1, 0),
++	SOC_DAPM_SINGLE("PCM_2_CAP_CH2", SND_SOC_NOPM, 0, 1, 0),
+ };
+ 
+ static int mtk_adda_ul_event(struct snd_soc_dapm_widget *w,
+@@ -90,6 +85,8 @@ static const struct snd_soc_dapm_widget mtk_dai_adda_widgets[] = {
+ 			      AFE_ADDA_UL_DL_CON0, ADDA_AFE_ON_SFT, 0,
+ 			      NULL, 0),
+ 
++	SND_SOC_DAPM_SUPPLY_S("I2S DAC Enable", SUPPLY_SEQ_ADDA_DL_ON,
++			      AFE_I2S_CON1, 0, 0, NULL, 0),
+ 	SND_SOC_DAPM_SUPPLY_S("ADDA Playback Enable", SUPPLY_SEQ_ADDA_DL_ON,
+ 			      AFE_ADDA_DL_SRC2_CON0,
+ 			      DL_2_SRC_ON_TMP_CTL_PRE_SFT, 0,
+@@ -135,6 +132,7 @@ static const struct snd_soc_dapm_route mtk_dai_adda_routes[] = {
+ 	/* adda enable */
+ 	{"ADDA Playback", NULL, "ADDA Enable"},
+ 	{"ADDA Playback", NULL, "ADDA Playback Enable"},
++	{"ADDA Playback", NULL, "I2S DAC Enable"},
+ 	{"ADDA Capture", NULL, "ADDA Enable"},
+ 	{"ADDA Capture", NULL, "ADDA Capture Enable"},
+ 
+@@ -147,6 +145,25 @@ static const struct snd_soc_dapm_route mtk_dai_adda_routes[] = {
+ 	{"ADDA Capture", NULL, "aud_adc_clk"},
+ };
+ 
++static unsigned int mt6735_i2s_rate(unsigned int rate)
++{
++	switch (rate) {
++	case 8000: return 0;
++	case 11025: return 1;
++	case 12000: return 2;
++	case 16000: return 4;
++	case 22050: return 5;
++	case 24000: return 6;
++	case 32000: return 8;
++	case 44100: return 9;
++	case 88200: return 11;
++	case 96000: return 12;
++	case 192000: return 14;
++	case 48000:
++	default: return 10;
++	}
++}
++
+ /* dai ops */
+ static int mtk_dai_adda_hw_params(struct snd_pcm_substream *substream,
+ 				  struct snd_pcm_hw_params *params,
+@@ -162,6 +179,10 @@ static int mtk_dai_adda_hw_params(struct snd_pcm_substream *substream,
+ 		unsigned int dl_src2_con0 = 0;
+ 		unsigned int dl_src2_con1 = 0;
+ 
++		/* I2S DAC out (vendor SetI2SDacOut): rate, I2S format, 16-bit; bit0 = DAPM supply */
++		regmap_update_bits(afe->regmap, AFE_I2S_CON1, ~0x1u,
++				   mt6735_i2s_rate(rate) << 8 | 1 << 3);
++
+ 		/* clean predistortion */
+ 		regmap_write(afe->regmap, AFE_ADDA_PREDIS_CON0, 0);
+ 		regmap_write(afe->regmap, AFE_ADDA_PREDIS_CON1, 0);
+diff --git a/sound/soc/mediatek/mt6735/mt6735-mt6328.c b/sound/soc/mediatek/mt6735/mt6735-mt6328.c
+index 468def470..373bb02b3 100644
+--- a/sound/soc/mediatek/mt6735/mt6735-mt6328.c
++++ b/sound/soc/mediatek/mt6735/mt6735-mt6328.c
+@@ -36,9 +36,8 @@ static const struct snd_soc_dapm_widget mt6735_mt6328_widgets[] = {
+ static const struct snd_soc_dapm_route mt6735_mt6328_routes[] = {
+ 	{"Headphone", NULL, "HPL"},
+ 	{"Headphone", NULL, "HPR"},
+-	/* external amp input is not known yet: feed it from either codec output */
++	/* the external speaker amp (GPIO9) is fed by the codec headphone output */
+ 	{"Ext Spk", NULL, "HPL"},
+-	{"Ext Spk", NULL, "SPK"},
+ };
+ 
+ static const struct snd_kcontrol_new mt6735_mt6328_controls[] = {
+@@ -124,9 +123,10 @@ static int mt6735_mt6328_probe(struct platform_device *pdev)
+ 		return dev_err_probe(&pdev->dev, -EINVAL, "mediatek,audio-codec missing\n");
+ 	}
+ 	for_each_card_prelinks(card, i, dai_link) {
+-		if (!dai_link->platforms->name)
++		/* COMP_DUMMY() is an empty array: only touch entries that exist */
++		if (dai_link->num_platforms && !dai_link->platforms->name)
+ 			dai_link->platforms->of_node = platform_node;
+-		if (!dai_link->codecs->name)
++		if (dai_link->num_codecs && !dai_link->codecs->name)
+ 			dai_link->codecs->of_node = codec_node;
+ 	}
+ 	ret = devm_snd_soc_register_card(&pdev->dev, card);

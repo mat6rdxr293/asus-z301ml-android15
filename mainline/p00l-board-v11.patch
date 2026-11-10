@@ -1,0 +1,1651 @@
+diff --git a/arch/arm64/boot/dts/mediatek/Makefile b/arch/arm64/boot/dts/mediatek/Makefile
+index 0f7ea0390..1a26eab27 100644
+--- a/arch/arm64/boot/dts/mediatek/Makefile
++++ b/arch/arm64/boot/dts/mediatek/Makefile
+@@ -182,3 +182,11 @@ DTC_FLAGS_mt7988a-bananapi-bpi-r4-2g5 := -@
+ DTC_FLAGS_mt7988a-bananapi-bpi-r4-pro-4e := -@
+ DTC_FLAGS_mt7988a-bananapi-bpi-r4-pro-8x := -@
+ DTC_FLAGS_mt8395-radxa-nio-12l := -@
++dtb-$(CONFIG_ARCH_MEDIATEK) += mt6735-asus-p00l.dtb
++dtb-$(CONFIG_ARCH_MEDIATEK) += mt6735-asus-p00l-v2.dtb
++dtb-$(CONFIG_ARCH_MEDIATEK) += mt6735-asus-p00l-v5.dtb
++dtb-$(CONFIG_ARCH_MEDIATEK) += mt6735-asus-p00l-v6.dtb
++dtb-$(CONFIG_ARCH_MEDIATEK) += mt6735-asus-p00l-v7.dtb
++dtb-$(CONFIG_ARCH_MEDIATEK) += mt6735-asus-p00l-v9.dtb
++dtb-$(CONFIG_ARCH_MEDIATEK) += mt6735-asus-p00l-v10.dtb
++dtb-$(CONFIG_ARCH_MEDIATEK) += mt6735-asus-p00l-v11.dtb
+diff --git a/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v10.dts b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v10.dts
+new file mode 100644
+index 000000000..e6724dea6
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v10.dts
+@@ -0,0 +1,208 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * ASUS ZenPad 10 Z301ML / P00L (ASUS8735_TB_301_N)
++ * MT8735A (MT6735 family)
++ *
++ * BRING-UP V2 — build and offline analysis only, NOT validated on hardware.
++ * Extracted board wiring from factory 3.18 recovery DTB.
++ * Do not deploy without proving a reliable rollback path.
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/interrupt-controller/irq.h>
++#include "mt6735.dtsi"
++#include "mt6328.dtsi"
++
++/ {
++	model = "MT6735";
++	compatible = "asus,z301ml", "mediatek,MT6735", "mediatek,mt6735";
++
++	aliases {
++		serial0 = &uart0;
++	};
++
++	firmware {
++		android {
++			compatible = "android,firmware";
++		};
++	};
++
++	chosen {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++		stdout-path = "/chosen/framebuffer";
++		zimage64,cmdline-override = "console=tty0 loglevel=8 ignore_loglevel printk.time=1 panic=0 rdinit=/init clk_ignore_unused pd_ignore_unused regulator_ignore_unused fbcon=rotate:1";
++
++		/* reg is patched at boot by zimage64 payload fbprobe from atag,videolfb (LK fb_base) */
++		lk_framebuffer: framebuffer {
++			compatible = "simple-framebuffer";
++			reg = <0 0 0 0x01000000>;
++			width = <800>;
++			height = <1280>;
++			stride = <3200>;
++			format = "a8r8g8b8";
++			status = "okay";
++		};
++	};
++
++	/*
++	 * The factory DTB advertises a conservative 496 MiB initial region.
++	 * Actual physical RAM appears to be ~3 GiB; mapping remaining banks
++	 * requires secure-memory and modem carveout audit first.
++	 */
++	memory@40000000 {
++		device_type = "memory";
++		reg = <0 0x40000000 0 0x1f000000>;
++	};
++
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		/* names/compatibles as in factory DTB: stock LK walks/patches these */
++		atf-reserved-memory@43000000 {
++			compatible = "mediatek,mt6735-atf-reserved-memory", "mediatek,mt6735m-atf-reserved-memory", "mediatek,mt6753-atf-reserved-memory";
++			no-map;
++			reg = <0 0x43000000 0 0x30000>;
++		};
++
++		ram_console-reserved-memory@43f00000 {
++			compatible = "mediatek,ram_console";
++			reg = <0 0x43f00000 0 0x10000>;
++			no-map;
++		};
++
++		ramoops@43f10000 {
++			compatible = "ramoops";
++			/* console zone first and inside LK kedump window 0x43f00000..0x43f80000 */
++			reg = <0 0x43f10000 0 0x00070000>;
++			no-map;
++			record-size = <0>;
++			console-size = <0x00060000>;
++			ftrace-size = <0>;
++			pmsg-size = <0>;
++		};
++
++		minirdump-reserved-memory@43ff0000 {
++			compatible = "mediatek,minirdump";
++			reg = <0 0x43ff0000 0 0x10000>;
++			no-map;
++		};
++
++		reserve-memory-ccci_md1 {
++			compatible = "mediatek,reserve-memory-ccci_md1";
++			no-map;
++			size = <0 0x3810000>;
++			alignment = <0 0x2000000>;
++			alloc-ranges = <0 0x40000000 0 0xc0000000>;
++		};
++
++		/* reg patched at boot by zimage64 payload (OVL scanout addr) */
++		lkfb {
++			reg = <0 0 0 0x01000000>;
++			no-map;
++		};
++
++		consys-reserve-memory {
++			compatible = "mediatek,consys-reserve-memory";
++			no-map;
++			size = <0 0x100000>;
++			alignment = <0 0x200000>;
++		};
++	};
++
++};
++
++&uart0 {
++	status = "okay";
++};
++
++/* Built-in eMMC on MSDC0, x8. Keep conservative 52 MHz while bringing up. */
++&mmc0 {
++	status = "okay";
++	bus-width = <8>;
++	max-frequency = <52000000>;
++	cap-mmc-highspeed;
++	non-removable;
++	vmmc-supply = <&mt6328_vemc33_reg>;
++	vqmmc-supply = <&mt6328_vio18_reg>;
++};
++
++/*
++ * External microSD slot on MSDC1, x4.
++ * Stock DTB: GPIO11 active-low card-detect.
++ * Not essential for first boot, but board wiring is grounded.
++ */
++&mmc1 {
++	status = "okay";
++	bus-width = <4>;
++	max-frequency = <50000000>;
++	cap-sd-highspeed;
++	cd-gpios = <&pio 11 GPIO_ACTIVE_LOW>;
++	vmmc-supply = <&mt6328_vmc_reg>;
++	vqmmc-supply = <&mt6328_vmch_reg>;
++};
++
++/*
++ * Vendor DTS: FocalTech FT5826 at I2C1 address 0x38.
++ * IRQ is GPIO10 (falling edge), reset GPIO131.
++ * Current edt-ft5x06 driver does NOT match focaltech,ft5826;
++ * keep the node disabled until a driver/ID match is confirmed.
++ */
++&i2c1 {
++	status = "okay";
++	clock-frequency = <400000>;
++
++	touchscreen@38 {
++		compatible = "focaltech,ft5826";
++		reg = <0x38>;
++		interrupt-parent = <&pio>;
++		interrupts = <10 IRQ_TYPE_EDGE_FALLING>;
++		reset-gpios = <&pio 131 GPIO_ACTIVE_LOW>;
++		/* Preserve wiring, but do not bind an unverified driver. */
++		status = "disabled";
++	};
++};
++
++/*
++ * MUSB at 0x11200000 with TPHY at 0x11210000.
++ * Gadget/console needs CONFIG_USB_MUSB_MEDIATEK and a functioning UDC.
++ * No verified VBUS/PMIC role signaling yet, forcing peripheral role only.
++ */
++&usb2phy {
++	status = "okay";
++};
++
++&usb2 {
++	status = "okay";
++	dr_mode = "peripheral";
++	maximum-speed = "high-speed";
++
++	usb_con: connector {
++		compatible = "usb-b-connector";
++		type = "micro";
++	};
++};
++
++/*
++ * LCD: vendor lcm GPIO power=147, backlight=3, reset=146.
++ * DSI is present in mt6735.dtsi, but panel model and init sequence
++ * remain unknown. Therefore do not enable &dsi yet.
++ *
++ * PMIC, Wi-Fi, audio, LTE, camera, GPU, touch remain unsupported or
++ * unverified. This build is for UART, pstore, eMMC and USB bring-up.
++ */
++
++
++&pwrap {
++	status = "okay";
++};
++
++&spm {
++	/* as on doogee-x5pro: VEN domain does not power on and blocks fb console */
++	/delete-node/ power-domain@MT6735_POWER_DOMAIN_VEN;
++};
+diff --git a/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v11.dts b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v11.dts
+new file mode 100644
+index 000000000..f630d8882
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v11.dts
+@@ -0,0 +1,231 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * ASUS ZenPad 10 Z301ML / P00L (ASUS8735_TB_301_N)
++ * MT8735A (MT6735 family)
++ *
++ * BRING-UP V2 — build and offline analysis only, NOT validated on hardware.
++ * Extracted board wiring from factory 3.18 recovery DTB.
++ * Do not deploy without proving a reliable rollback path.
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/interrupt-controller/irq.h>
++#include <dt-bindings/pinctrl/mediatek,mt6735-pinctrl.h>
++#include "mt6735.dtsi"
++#include "mt6328.dtsi"
++
++/ {
++	model = "MT6735";
++	compatible = "asus,z301ml", "mediatek,MT6735", "mediatek,mt6735";
++
++	aliases {
++		serial0 = &uart0;
++	};
++
++	firmware {
++		android {
++			compatible = "android,firmware";
++		};
++	};
++
++	chosen {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++		stdout-path = "/chosen/framebuffer";
++		zimage64,cmdline-override = "console=tty0 loglevel=8 ignore_loglevel printk.time=1 panic=0 rdinit=/init clk_ignore_unused pd_ignore_unused regulator_ignore_unused fbcon=rotate:1";
++
++		/* reg is patched at boot by zimage64 payload fbprobe from atag,videolfb (LK fb_base) */
++		lk_framebuffer: framebuffer {
++			compatible = "simple-framebuffer";
++			reg = <0 0 0 0x01000000>;
++			width = <800>;
++			height = <1280>;
++			stride = <3200>;
++			format = "a8r8g8b8";
++			status = "okay";
++		};
++	};
++
++	/*
++	 * The factory DTB advertises a conservative 496 MiB initial region.
++	 * Actual physical RAM appears to be ~3 GiB; mapping remaining banks
++	 * requires secure-memory and modem carveout audit first.
++	 */
++	memory@40000000 {
++		device_type = "memory";
++		reg = <0 0x40000000 0 0x1f000000>;
++	};
++
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		/* names/compatibles as in factory DTB: stock LK walks/patches these */
++		atf-reserved-memory@43000000 {
++			compatible = "mediatek,mt6735-atf-reserved-memory", "mediatek,mt6735m-atf-reserved-memory", "mediatek,mt6753-atf-reserved-memory";
++			no-map;
++			reg = <0 0x43000000 0 0x30000>;
++		};
++
++		ram_console-reserved-memory@43f00000 {
++			compatible = "mediatek,ram_console";
++			reg = <0 0x43f00000 0 0x10000>;
++			no-map;
++		};
++
++		ramoops@43f10000 {
++			compatible = "ramoops";
++			/* console zone first and inside LK kedump window 0x43f00000..0x43f80000 */
++			reg = <0 0x43f10000 0 0x00070000>;
++			no-map;
++			record-size = <0>;
++			console-size = <0x00060000>;
++			ftrace-size = <0>;
++			pmsg-size = <0>;
++		};
++
++		minirdump-reserved-memory@43ff0000 {
++			compatible = "mediatek,minirdump";
++			reg = <0 0x43ff0000 0 0x10000>;
++			no-map;
++		};
++
++		reserve-memory-ccci_md1 {
++			compatible = "mediatek,reserve-memory-ccci_md1";
++			no-map;
++			size = <0 0x3810000>;
++			alignment = <0 0x2000000>;
++			alloc-ranges = <0 0x40000000 0 0xc0000000>;
++		};
++
++		/* reg patched at boot by zimage64 payload (OVL scanout addr) */
++		lkfb {
++			reg = <0 0 0 0x01000000>;
++			no-map;
++		};
++
++		consys-reserve-memory {
++			compatible = "mediatek,consys-reserve-memory";
++			no-map;
++			size = <0 0x100000>;
++			alignment = <0 0x200000>;
++		};
++	};
++
++};
++
++&uart0 {
++	status = "okay";
++};
++
++/* Built-in eMMC on MSDC0, x8. Keep conservative 52 MHz while bringing up. */
++&mmc0 {
++	status = "okay";
++	bus-width = <8>;
++	max-frequency = <52000000>;
++	cap-mmc-highspeed;
++	non-removable;
++	vmmc-supply = <&mt6328_vemc33_reg>;
++	vqmmc-supply = <&mt6328_vio18_reg>;
++};
++
++/*
++ * External microSD slot on MSDC1, x4.
++ * Stock DTB: GPIO11 active-low card-detect.
++ * Not essential for first boot, but board wiring is grounded.
++ */
++&mmc1 {
++	status = "okay";
++	bus-width = <4>;
++	max-frequency = <50000000>;
++	cap-sd-highspeed;
++	cd-gpios = <&pio 11 GPIO_ACTIVE_LOW>;
++	vmmc-supply = <&mt6328_vmc_reg>;
++	vqmmc-supply = <&mt6328_vmch_reg>;
++};
++
++/*
++ * Vendor DTS: FocalTech FT5826 at I2C1 address 0x38.
++ * IRQ is GPIO10 (falling edge), reset GPIO131.
++ * Current edt-ft5x06 driver does NOT match focaltech,ft5826;
++ * keep the node disabled until a driver/ID match is confirmed.
++ */
++&i2c1 {
++	status = "okay";
++	clock-frequency = <400000>;
++
++	touchscreen@38 {
++		/* FocalTech FT5826 (vendor: mtk-tpd,ft5826); standard FTS report
++		 * format, handled by edt-ft5x06 GENERIC_FT path. */
++		compatible = "focaltech,ft5426";
++		reg = <0x38>;
++		interrupt-parent = <&pio>;
++		interrupts = <10 IRQ_TYPE_EDGE_FALLING>;
++		reset-gpios = <&pio 131 GPIO_ACTIVE_LOW>;
++		vcc-supply = <&mt6328_vgp1_reg>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&touch_default>;
++		/* measured: reported Y spans 0..~800 (panel width) -> axes swapped vs 800x1280 portrait panel; inversion TBD */
++		touchscreen-size-x = <1280>;
++		touchscreen-size-y = <800>;
++		touchscreen-swapped-x-y;
++	};
++};
++
++/*
++ * MUSB at 0x11200000 with TPHY at 0x11210000.
++ * Gadget/console needs CONFIG_USB_MUSB_MEDIATEK and a functioning UDC.
++ * No verified VBUS/PMIC role signaling yet, forcing peripheral role only.
++ */
++&usb2phy {
++	status = "okay";
++};
++
++&usb2 {
++	status = "okay";
++	dr_mode = "peripheral";
++	maximum-speed = "high-speed";
++
++	usb_con: connector {
++		compatible = "usb-b-connector";
++		type = "micro";
++	};
++};
++
++/*
++ * LCD: vendor lcm GPIO power=147, backlight=3, reset=146.
++ * DSI is present in mt6735.dtsi, but panel model and init sequence
++ * remain unknown. Therefore do not enable &dsi yet.
++ *
++ * PMIC, Wi-Fi, audio, LTE, camera, GPU, touch remain unsupported or
++ * unverified. This build is for UART, pstore, eMMC and USB bring-up.
++ */
++
++
++&pwrap {
++	status = "okay";
++};
++
++&spm {
++	/* as on doogee-x5pro: VEN domain does not power on and blocks fb console */
++	/delete-node/ power-domain@MT6735_POWER_DOMAIN_VEN;
++};
++
++&pio {
++	touch_default: touch-default-pins {
++		pins-int {
++			pinmux = <PINMUX_GPIO10__FUNC_GPIO10>;
++			input-enable;
++			bias-pull-up;
++		};
++
++		pins-rst {
++			pinmux = <PINMUX_GPIO131__FUNC_GPIO131>;
++			output-high;
++		};
++	};
++};
+diff --git a/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v2.dts b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v2.dts
+new file mode 100644
+index 000000000..c0b72ad3a
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v2.dts
+@@ -0,0 +1,159 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * ASUS ZenPad 10 Z301ML / P00L (ASUS8735_TB_301_N)
++ * MT8735A (MT6735 family)
++ *
++ * BRING-UP V2 — build and offline analysis only, NOT validated on hardware.
++ * Extracted board wiring from factory 3.18 recovery DTB.
++ * Do not deploy without proving a reliable rollback path.
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/interrupt-controller/irq.h>
++#include "mt6735.dtsi"
++
++/ {
++	model = "ASUS ZenPad 10 Z301ML (P00L) - mainline bring-up v2";
++	compatible = "asus,z301ml", "mediatek,mt6735";
++
++	aliases {
++		serial0 = &uart0;
++	};
++
++	chosen {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++		stdout-path = "/chosen/framebuffer";
++
++		/* reg is patched at boot by zimage64 payload fbprobe from atag,videolfb (LK fb_base) */
++		lk_framebuffer: framebuffer {
++			compatible = "simple-framebuffer";
++			reg = <0 0 0 0x01000000>;
++			width = <800>;
++			height = <1280>;
++			stride = <3200>;
++			format = "a8r8g8b8";
++			status = "okay";
++		};
++	};
++
++	/*
++	 * The factory DTB advertises a conservative 496 MiB initial region.
++	 * Actual physical RAM appears to be ~3 GiB; mapping remaining banks
++	 * requires secure-memory and modem carveout audit first.
++	 */
++	memory@40000000 {
++		device_type = "memory";
++		reg = <0 0x40000000 0 0x1f000000>;
++	};
++
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		/* From factory DTB: ARM Trusted Firmware, DO NOT MAP. */
++		atf@43000000 {
++			reg = <0 0x43000000 0 0x00030000>;
++			no-map;
++		};
++
++		/*
++		 * Factory kernel specifies a region at 0x43f10000.
++		 * On mainline use a single ramoops owner, not the overlapping
++		 * vendor ram_console (0x43f00000..0x43f80000).
++		 */
++		ramoops@43f10000 {
++			compatible = "ramoops";
++			reg = <0 0x43f10000 0 0x000e0000>;
++			record-size = <0x00080000>;
++			console-size = <0x00010000>;
++			ftrace-size = <0x00020000>;
++			pmsg-size = <0x00010000>;
++		};
++
++		minirdump@43ff0000 {
++			reg = <0 0x43ff0000 0 0x00010000>;
++			no-map;
++		};
++	};
++};
++
++&uart0 {
++	status = "okay";
++};
++
++/* Built-in eMMC on MSDC0, x8. Keep conservative 52 MHz while bringing up. */
++&mmc0 {
++	status = "okay";
++	bus-width = <8>;
++	max-frequency = <52000000>;
++	cap-mmc-highspeed;
++	non-removable;
++};
++
++/*
++ * External microSD slot on MSDC1, x4.
++ * Stock DTB: GPIO11 active-low card-detect.
++ * Not essential for first boot, but board wiring is grounded.
++ */
++&mmc1 {
++	status = "okay";
++	bus-width = <4>;
++	max-frequency = <50000000>;
++	cap-sd-highspeed;
++	cd-gpios = <&pio 11 GPIO_ACTIVE_LOW>;
++};
++
++/*
++ * Vendor DTS: FocalTech FT5826 at I2C1 address 0x38.
++ * IRQ is GPIO10 (falling edge), reset GPIO131.
++ * Current edt-ft5x06 driver does NOT match focaltech,ft5826;
++ * keep the node disabled until a driver/ID match is confirmed.
++ */
++&i2c1 {
++	status = "okay";
++	clock-frequency = <400000>;
++
++	touchscreen@38 {
++		compatible = "focaltech,ft5826";
++		reg = <0x38>;
++		interrupt-parent = <&pio>;
++		interrupts = <10 IRQ_TYPE_EDGE_FALLING>;
++		reset-gpios = <&pio 131 GPIO_ACTIVE_LOW>;
++		/* Preserve wiring, but do not bind an unverified driver. */
++		status = "disabled";
++	};
++};
++
++/*
++ * MUSB at 0x11200000 with TPHY at 0x11210000.
++ * Gadget/console needs CONFIG_USB_MUSB_MEDIATEK and a functioning UDC.
++ * No verified VBUS/PMIC role signaling yet, forcing peripheral role only.
++ */
++&usb2phy {
++	status = "okay";
++};
++
++&usb2 {
++	status = "okay";
++	dr_mode = "peripheral";
++	maximum-speed = "high-speed";
++};
++
++/*
++ * LCD: vendor lcm GPIO power=147, backlight=3, reset=146.
++ * DSI is present in mt6735.dtsi, but panel model and init sequence
++ * remain unknown. Therefore do not enable &dsi yet.
++ *
++ * PMIC, Wi-Fi, audio, LTE, camera, GPU, touch remain unsupported or
++ * unverified. This build is for UART, pstore, eMMC and USB bring-up.
++ */
++
++/* Secondary CPUs are broken on this platform due to firmware issues (same as doogee-x5pro) */
++/delete-node/ &cpu1;
++/delete-node/ &cpu2;
++/delete-node/ &cpu3;
+diff --git a/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v5.dts b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v5.dts
+new file mode 100644
+index 000000000..2a600a423
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v5.dts
+@@ -0,0 +1,185 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * ASUS ZenPad 10 Z301ML / P00L (ASUS8735_TB_301_N)
++ * MT8735A (MT6735 family)
++ *
++ * BRING-UP V2 — build and offline analysis only, NOT validated on hardware.
++ * Extracted board wiring from factory 3.18 recovery DTB.
++ * Do not deploy without proving a reliable rollback path.
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/interrupt-controller/irq.h>
++#include "mt6735.dtsi"
++
++/ {
++	model = "MT6735";
++	compatible = "asus,z301ml", "mediatek,MT6735", "mediatek,mt6735";
++
++	aliases {
++		serial0 = &uart0;
++	};
++
++	firmware {
++		android {
++			compatible = "android,firmware";
++		};
++	};
++
++	chosen {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++		stdout-path = "/chosen/framebuffer";
++
++		/* reg is patched at boot by zimage64 payload fbprobe from atag,videolfb (LK fb_base) */
++		lk_framebuffer: framebuffer {
++			compatible = "simple-framebuffer";
++			reg = <0 0 0 0x01000000>;
++			width = <800>;
++			height = <1280>;
++			stride = <3200>;
++			format = "a8r8g8b8";
++			status = "okay";
++		};
++	};
++
++	/*
++	 * The factory DTB advertises a conservative 496 MiB initial region.
++	 * Actual physical RAM appears to be ~3 GiB; mapping remaining banks
++	 * requires secure-memory and modem carveout audit first.
++	 */
++	memory@40000000 {
++		device_type = "memory";
++		reg = <0 0x40000000 0 0x1f000000>;
++	};
++
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		/* names/compatibles as in factory DTB: stock LK walks/patches these */
++		atf-reserved-memory@43000000 {
++			compatible = "mediatek,mt6735-atf-reserved-memory", "mediatek,mt6735m-atf-reserved-memory", "mediatek,mt6753-atf-reserved-memory";
++			no-map;
++			reg = <0 0x43000000 0 0x30000>;
++		};
++
++		ram_console-reserved-memory@43f00000 {
++			compatible = "mediatek,ram_console";
++			reg = <0 0x43f00000 0 0x10000>;
++			no-map;
++		};
++
++		ramoops@43f10000 {
++			compatible = "ramoops";
++			reg = <0 0x43f10000 0 0x000e0000>;
++			no-map;
++			record-size = <0x00080000>;
++			console-size = <0x00010000>;
++			ftrace-size = <0x00020000>;
++			pmsg-size = <0x00010000>;
++		};
++
++		minirdump-reserved-memory@43ff0000 {
++			compatible = "mediatek,minirdump";
++			reg = <0 0x43ff0000 0 0x10000>;
++			no-map;
++		};
++
++		reserve-memory-ccci_md1 {
++			compatible = "mediatek,reserve-memory-ccci_md1";
++			no-map;
++			size = <0 0x3810000>;
++			alignment = <0 0x2000000>;
++			alloc-ranges = <0 0x40000000 0 0xc0000000>;
++		};
++
++		consys-reserve-memory {
++			compatible = "mediatek,consys-reserve-memory";
++			no-map;
++			size = <0 0x100000>;
++			alignment = <0 0x200000>;
++		};
++	};
++
++};
++
++&uart0 {
++	status = "okay";
++};
++
++/* Built-in eMMC on MSDC0, x8. Keep conservative 52 MHz while bringing up. */
++&mmc0 {
++	status = "okay";
++	bus-width = <8>;
++	max-frequency = <52000000>;
++	cap-mmc-highspeed;
++	non-removable;
++};
++
++/*
++ * External microSD slot on MSDC1, x4.
++ * Stock DTB: GPIO11 active-low card-detect.
++ * Not essential for first boot, but board wiring is grounded.
++ */
++&mmc1 {
++	status = "okay";
++	bus-width = <4>;
++	max-frequency = <50000000>;
++	cap-sd-highspeed;
++	cd-gpios = <&pio 11 GPIO_ACTIVE_LOW>;
++};
++
++/*
++ * Vendor DTS: FocalTech FT5826 at I2C1 address 0x38.
++ * IRQ is GPIO10 (falling edge), reset GPIO131.
++ * Current edt-ft5x06 driver does NOT match focaltech,ft5826;
++ * keep the node disabled until a driver/ID match is confirmed.
++ */
++&i2c1 {
++	status = "okay";
++	clock-frequency = <400000>;
++
++	touchscreen@38 {
++		compatible = "focaltech,ft5826";
++		reg = <0x38>;
++		interrupt-parent = <&pio>;
++		interrupts = <10 IRQ_TYPE_EDGE_FALLING>;
++		reset-gpios = <&pio 131 GPIO_ACTIVE_LOW>;
++		/* Preserve wiring, but do not bind an unverified driver. */
++		status = "disabled";
++	};
++};
++
++/*
++ * MUSB at 0x11200000 with TPHY at 0x11210000.
++ * Gadget/console needs CONFIG_USB_MUSB_MEDIATEK and a functioning UDC.
++ * No verified VBUS/PMIC role signaling yet, forcing peripheral role only.
++ */
++&usb2phy {
++	status = "okay";
++};
++
++&usb2 {
++	status = "okay";
++	dr_mode = "peripheral";
++	maximum-speed = "high-speed";
++};
++
++/*
++ * LCD: vendor lcm GPIO power=147, backlight=3, reset=146.
++ * DSI is present in mt6735.dtsi, but panel model and init sequence
++ * remain unknown. Therefore do not enable &dsi yet.
++ *
++ * PMIC, Wi-Fi, audio, LTE, camera, GPU, touch remain unsupported or
++ * unverified. This build is for UART, pstore, eMMC and USB bring-up.
++ */
++
++/* Secondary CPUs are broken on this platform due to firmware issues (same as doogee-x5pro) */
++/delete-node/ &cpu1;
++/delete-node/ &cpu2;
++/delete-node/ &cpu3;
+diff --git a/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v6.dts b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v6.dts
+new file mode 100644
+index 000000000..456398a29
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v6.dts
+@@ -0,0 +1,186 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * ASUS ZenPad 10 Z301ML / P00L (ASUS8735_TB_301_N)
++ * MT8735A (MT6735 family)
++ *
++ * BRING-UP V2 — build and offline analysis only, NOT validated on hardware.
++ * Extracted board wiring from factory 3.18 recovery DTB.
++ * Do not deploy without proving a reliable rollback path.
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/interrupt-controller/irq.h>
++#include "mt6735.dtsi"
++
++/ {
++	model = "MT6735";
++	compatible = "asus,z301ml", "mediatek,MT6735", "mediatek,mt6735";
++
++	aliases {
++		serial0 = &uart0;
++	};
++
++	firmware {
++		android {
++			compatible = "android,firmware";
++		};
++	};
++
++	chosen {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++		stdout-path = "/chosen/framebuffer";
++
++		/* reg is patched at boot by zimage64 payload fbprobe from atag,videolfb (LK fb_base) */
++		lk_framebuffer: framebuffer {
++			compatible = "simple-framebuffer";
++			reg = <0 0 0 0x01000000>;
++			width = <800>;
++			height = <1280>;
++			stride = <3200>;
++			format = "a8r8g8b8";
++			status = "okay";
++		};
++	};
++
++	/*
++	 * The factory DTB advertises a conservative 496 MiB initial region.
++	 * Actual physical RAM appears to be ~3 GiB; mapping remaining banks
++	 * requires secure-memory and modem carveout audit first.
++	 */
++	memory@40000000 {
++		device_type = "memory";
++		reg = <0 0x40000000 0 0x1f000000>;
++	};
++
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		/* names/compatibles as in factory DTB: stock LK walks/patches these */
++		atf-reserved-memory@43000000 {
++			compatible = "mediatek,mt6735-atf-reserved-memory", "mediatek,mt6735m-atf-reserved-memory", "mediatek,mt6753-atf-reserved-memory";
++			no-map;
++			reg = <0 0x43000000 0 0x30000>;
++		};
++
++		ram_console-reserved-memory@43f00000 {
++			compatible = "mediatek,ram_console";
++			reg = <0 0x43f00000 0 0x10000>;
++			no-map;
++		};
++
++		ramoops@43f10000 {
++			compatible = "ramoops";
++			/* console zone first and inside LK kedump window 0x43f00000..0x43f80000 */
++			reg = <0 0x43f10000 0 0x00070000>;
++			no-map;
++			record-size = <0>;
++			console-size = <0x00060000>;
++			ftrace-size = <0>;
++			pmsg-size = <0>;
++		};
++
++		minirdump-reserved-memory@43ff0000 {
++			compatible = "mediatek,minirdump";
++			reg = <0 0x43ff0000 0 0x10000>;
++			no-map;
++		};
++
++		reserve-memory-ccci_md1 {
++			compatible = "mediatek,reserve-memory-ccci_md1";
++			no-map;
++			size = <0 0x3810000>;
++			alignment = <0 0x2000000>;
++			alloc-ranges = <0 0x40000000 0 0xc0000000>;
++		};
++
++		consys-reserve-memory {
++			compatible = "mediatek,consys-reserve-memory";
++			no-map;
++			size = <0 0x100000>;
++			alignment = <0 0x200000>;
++		};
++	};
++
++};
++
++&uart0 {
++	status = "okay";
++};
++
++/* Built-in eMMC on MSDC0, x8. Keep conservative 52 MHz while bringing up. */
++&mmc0 {
++	status = "okay";
++	bus-width = <8>;
++	max-frequency = <52000000>;
++	cap-mmc-highspeed;
++	non-removable;
++};
++
++/*
++ * External microSD slot on MSDC1, x4.
++ * Stock DTB: GPIO11 active-low card-detect.
++ * Not essential for first boot, but board wiring is grounded.
++ */
++&mmc1 {
++	status = "okay";
++	bus-width = <4>;
++	max-frequency = <50000000>;
++	cap-sd-highspeed;
++	cd-gpios = <&pio 11 GPIO_ACTIVE_LOW>;
++};
++
++/*
++ * Vendor DTS: FocalTech FT5826 at I2C1 address 0x38.
++ * IRQ is GPIO10 (falling edge), reset GPIO131.
++ * Current edt-ft5x06 driver does NOT match focaltech,ft5826;
++ * keep the node disabled until a driver/ID match is confirmed.
++ */
++&i2c1 {
++	status = "okay";
++	clock-frequency = <400000>;
++
++	touchscreen@38 {
++		compatible = "focaltech,ft5826";
++		reg = <0x38>;
++		interrupt-parent = <&pio>;
++		interrupts = <10 IRQ_TYPE_EDGE_FALLING>;
++		reset-gpios = <&pio 131 GPIO_ACTIVE_LOW>;
++		/* Preserve wiring, but do not bind an unverified driver. */
++		status = "disabled";
++	};
++};
++
++/*
++ * MUSB at 0x11200000 with TPHY at 0x11210000.
++ * Gadget/console needs CONFIG_USB_MUSB_MEDIATEK and a functioning UDC.
++ * No verified VBUS/PMIC role signaling yet, forcing peripheral role only.
++ */
++&usb2phy {
++	status = "okay";
++};
++
++&usb2 {
++	status = "okay";
++	dr_mode = "peripheral";
++	maximum-speed = "high-speed";
++};
++
++/*
++ * LCD: vendor lcm GPIO power=147, backlight=3, reset=146.
++ * DSI is present in mt6735.dtsi, but panel model and init sequence
++ * remain unknown. Therefore do not enable &dsi yet.
++ *
++ * PMIC, Wi-Fi, audio, LTE, camera, GPU, touch remain unsupported or
++ * unverified. This build is for UART, pstore, eMMC and USB bring-up.
++ */
++
++/* Secondary CPUs are broken on this platform due to firmware issues (same as doogee-x5pro) */
++/delete-node/ &cpu1;
++/delete-node/ &cpu2;
++/delete-node/ &cpu3;
+diff --git a/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v7.dts b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v7.dts
+new file mode 100644
+index 000000000..207e6b986
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v7.dts
+@@ -0,0 +1,212 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * ASUS ZenPad 10 Z301ML / P00L (ASUS8735_TB_301_N)
++ * MT8735A (MT6735 family)
++ *
++ * BRING-UP V2 — build and offline analysis only, NOT validated on hardware.
++ * Extracted board wiring from factory 3.18 recovery DTB.
++ * Do not deploy without proving a reliable rollback path.
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/interrupt-controller/irq.h>
++#include "mt6735.dtsi"
++#include "mt6328.dtsi"
++
++/ {
++	model = "MT6735";
++	compatible = "asus,z301ml", "mediatek,MT6735", "mediatek,mt6735";
++
++	aliases {
++		serial0 = &uart0;
++	};
++
++	firmware {
++		android {
++			compatible = "android,firmware";
++		};
++	};
++
++	chosen {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++		stdout-path = "/chosen/framebuffer";
++		zimage64,cmdline-override = "console=tty0 loglevel=8 ignore_loglevel printk.time=1 panic=0 rdinit=/init clk_ignore_unused pd_ignore_unused regulator_ignore_unused fbcon=rotate:1";
++
++		/* reg is patched at boot by zimage64 payload fbprobe from atag,videolfb (LK fb_base) */
++		lk_framebuffer: framebuffer {
++			compatible = "simple-framebuffer";
++			reg = <0 0 0 0x01000000>;
++			width = <800>;
++			height = <1280>;
++			stride = <3200>;
++			format = "a8r8g8b8";
++			status = "okay";
++		};
++	};
++
++	/*
++	 * The factory DTB advertises a conservative 496 MiB initial region.
++	 * Actual physical RAM appears to be ~3 GiB; mapping remaining banks
++	 * requires secure-memory and modem carveout audit first.
++	 */
++	memory@40000000 {
++		device_type = "memory";
++		reg = <0 0x40000000 0 0x1f000000>;
++	};
++
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		/* names/compatibles as in factory DTB: stock LK walks/patches these */
++		atf-reserved-memory@43000000 {
++			compatible = "mediatek,mt6735-atf-reserved-memory", "mediatek,mt6735m-atf-reserved-memory", "mediatek,mt6753-atf-reserved-memory";
++			no-map;
++			reg = <0 0x43000000 0 0x30000>;
++		};
++
++		ram_console-reserved-memory@43f00000 {
++			compatible = "mediatek,ram_console";
++			reg = <0 0x43f00000 0 0x10000>;
++			no-map;
++		};
++
++		ramoops@43f10000 {
++			compatible = "ramoops";
++			/* console zone first and inside LK kedump window 0x43f00000..0x43f80000 */
++			reg = <0 0x43f10000 0 0x00070000>;
++			no-map;
++			record-size = <0>;
++			console-size = <0x00060000>;
++			ftrace-size = <0>;
++			pmsg-size = <0>;
++		};
++
++		minirdump-reserved-memory@43ff0000 {
++			compatible = "mediatek,minirdump";
++			reg = <0 0x43ff0000 0 0x10000>;
++			no-map;
++		};
++
++		reserve-memory-ccci_md1 {
++			compatible = "mediatek,reserve-memory-ccci_md1";
++			no-map;
++			size = <0 0x3810000>;
++			alignment = <0 0x2000000>;
++			alloc-ranges = <0 0x40000000 0 0xc0000000>;
++		};
++
++		/* reg patched at boot by zimage64 payload (OVL scanout addr) */
++		lkfb {
++			reg = <0 0 0 0x01000000>;
++			no-map;
++		};
++
++		consys-reserve-memory {
++			compatible = "mediatek,consys-reserve-memory";
++			no-map;
++			size = <0 0x100000>;
++			alignment = <0 0x200000>;
++		};
++	};
++
++};
++
++&uart0 {
++	status = "okay";
++};
++
++/* Built-in eMMC on MSDC0, x8. Keep conservative 52 MHz while bringing up. */
++&mmc0 {
++	status = "okay";
++	bus-width = <8>;
++	max-frequency = <52000000>;
++	cap-mmc-highspeed;
++	non-removable;
++	vmmc-supply = <&mt6328_vemc33_reg>;
++	vqmmc-supply = <&mt6328_vio18_reg>;
++};
++
++/*
++ * External microSD slot on MSDC1, x4.
++ * Stock DTB: GPIO11 active-low card-detect.
++ * Not essential for first boot, but board wiring is grounded.
++ */
++&mmc1 {
++	status = "okay";
++	bus-width = <4>;
++	max-frequency = <50000000>;
++	cap-sd-highspeed;
++	cd-gpios = <&pio 11 GPIO_ACTIVE_LOW>;
++	vmmc-supply = <&mt6328_vmc_reg>;
++	vqmmc-supply = <&mt6328_vmch_reg>;
++};
++
++/*
++ * Vendor DTS: FocalTech FT5826 at I2C1 address 0x38.
++ * IRQ is GPIO10 (falling edge), reset GPIO131.
++ * Current edt-ft5x06 driver does NOT match focaltech,ft5826;
++ * keep the node disabled until a driver/ID match is confirmed.
++ */
++&i2c1 {
++	status = "okay";
++	clock-frequency = <400000>;
++
++	touchscreen@38 {
++		compatible = "focaltech,ft5826";
++		reg = <0x38>;
++		interrupt-parent = <&pio>;
++		interrupts = <10 IRQ_TYPE_EDGE_FALLING>;
++		reset-gpios = <&pio 131 GPIO_ACTIVE_LOW>;
++		/* Preserve wiring, but do not bind an unverified driver. */
++		status = "disabled";
++	};
++};
++
++/*
++ * MUSB at 0x11200000 with TPHY at 0x11210000.
++ * Gadget/console needs CONFIG_USB_MUSB_MEDIATEK and a functioning UDC.
++ * No verified VBUS/PMIC role signaling yet, forcing peripheral role only.
++ */
++&usb2phy {
++	status = "okay";
++};
++
++&usb2 {
++	status = "okay";
++	dr_mode = "peripheral";
++	maximum-speed = "high-speed";
++
++	usb_con: connector {
++		compatible = "usb-b-connector";
++		type = "micro";
++	};
++};
++
++/*
++ * LCD: vendor lcm GPIO power=147, backlight=3, reset=146.
++ * DSI is present in mt6735.dtsi, but panel model and init sequence
++ * remain unknown. Therefore do not enable &dsi yet.
++ *
++ * PMIC, Wi-Fi, audio, LTE, camera, GPU, touch remain unsupported or
++ * unverified. This build is for UART, pstore, eMMC and USB bring-up.
++ */
++
++/* Secondary CPUs are broken on this platform due to firmware issues (same as doogee-x5pro) */
++/delete-node/ &cpu1;
++/delete-node/ &cpu2;
++/delete-node/ &cpu3;
++
++&pwrap {
++	status = "okay";
++};
++
++&spm {
++	/* as on doogee-x5pro: VEN domain does not power on and blocks fb console */
++	/delete-node/ power-domain@MT6735_POWER_DOMAIN_VEN;
++};
+diff --git a/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v9.dts b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v9.dts
+new file mode 100644
+index 000000000..cf0c2f481
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l-v9.dts
+@@ -0,0 +1,208 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * ASUS ZenPad 10 Z301ML / P00L (ASUS8735_TB_301_N)
++ * MT8735A (MT6735 family)
++ *
++ * BRING-UP V2 — build and offline analysis only, NOT validated on hardware.
++ * Extracted board wiring from factory 3.18 recovery DTB.
++ * Do not deploy without proving a reliable rollback path.
++ */
++
++/dts-v1/;
++
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/interrupt-controller/irq.h>
++#include "mt6735.dtsi"
++#include "mt6328.dtsi"
++
++/ {
++	model = "MT6735";
++	compatible = "asus,z301ml", "mediatek,MT6735", "mediatek,mt6735";
++
++	aliases {
++		serial0 = &uart0;
++	};
++
++	firmware {
++		android {
++			compatible = "android,firmware";
++		};
++	};
++
++	chosen {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++		stdout-path = "/chosen/framebuffer";
++		zimage64,cmdline-override = "console=tty0 loglevel=8 ignore_loglevel printk.time=1 panic=0 rdinit=/init clk_ignore_unused pd_ignore_unused regulator_ignore_unused fbcon=rotate:1 maxcpus=1";
++
++		/* reg is patched at boot by zimage64 payload fbprobe from atag,videolfb (LK fb_base) */
++		lk_framebuffer: framebuffer {
++			compatible = "simple-framebuffer";
++			reg = <0 0 0 0x01000000>;
++			width = <800>;
++			height = <1280>;
++			stride = <3200>;
++			format = "a8r8g8b8";
++			status = "okay";
++		};
++	};
++
++	/*
++	 * The factory DTB advertises a conservative 496 MiB initial region.
++	 * Actual physical RAM appears to be ~3 GiB; mapping remaining banks
++	 * requires secure-memory and modem carveout audit first.
++	 */
++	memory@40000000 {
++		device_type = "memory";
++		reg = <0 0x40000000 0 0x1f000000>;
++	};
++
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		/* names/compatibles as in factory DTB: stock LK walks/patches these */
++		atf-reserved-memory@43000000 {
++			compatible = "mediatek,mt6735-atf-reserved-memory", "mediatek,mt6735m-atf-reserved-memory", "mediatek,mt6753-atf-reserved-memory";
++			no-map;
++			reg = <0 0x43000000 0 0x30000>;
++		};
++
++		ram_console-reserved-memory@43f00000 {
++			compatible = "mediatek,ram_console";
++			reg = <0 0x43f00000 0 0x10000>;
++			no-map;
++		};
++
++		ramoops@43f10000 {
++			compatible = "ramoops";
++			/* console zone first and inside LK kedump window 0x43f00000..0x43f80000 */
++			reg = <0 0x43f10000 0 0x00070000>;
++			no-map;
++			record-size = <0>;
++			console-size = <0x00060000>;
++			ftrace-size = <0>;
++			pmsg-size = <0>;
++		};
++
++		minirdump-reserved-memory@43ff0000 {
++			compatible = "mediatek,minirdump";
++			reg = <0 0x43ff0000 0 0x10000>;
++			no-map;
++		};
++
++		reserve-memory-ccci_md1 {
++			compatible = "mediatek,reserve-memory-ccci_md1";
++			no-map;
++			size = <0 0x3810000>;
++			alignment = <0 0x2000000>;
++			alloc-ranges = <0 0x40000000 0 0xc0000000>;
++		};
++
++		/* reg patched at boot by zimage64 payload (OVL scanout addr) */
++		lkfb {
++			reg = <0 0 0 0x01000000>;
++			no-map;
++		};
++
++		consys-reserve-memory {
++			compatible = "mediatek,consys-reserve-memory";
++			no-map;
++			size = <0 0x100000>;
++			alignment = <0 0x200000>;
++		};
++	};
++
++};
++
++&uart0 {
++	status = "okay";
++};
++
++/* Built-in eMMC on MSDC0, x8. Keep conservative 52 MHz while bringing up. */
++&mmc0 {
++	status = "okay";
++	bus-width = <8>;
++	max-frequency = <52000000>;
++	cap-mmc-highspeed;
++	non-removable;
++	vmmc-supply = <&mt6328_vemc33_reg>;
++	vqmmc-supply = <&mt6328_vio18_reg>;
++};
++
++/*
++ * External microSD slot on MSDC1, x4.
++ * Stock DTB: GPIO11 active-low card-detect.
++ * Not essential for first boot, but board wiring is grounded.
++ */
++&mmc1 {
++	status = "okay";
++	bus-width = <4>;
++	max-frequency = <50000000>;
++	cap-sd-highspeed;
++	cd-gpios = <&pio 11 GPIO_ACTIVE_LOW>;
++	vmmc-supply = <&mt6328_vmc_reg>;
++	vqmmc-supply = <&mt6328_vmch_reg>;
++};
++
++/*
++ * Vendor DTS: FocalTech FT5826 at I2C1 address 0x38.
++ * IRQ is GPIO10 (falling edge), reset GPIO131.
++ * Current edt-ft5x06 driver does NOT match focaltech,ft5826;
++ * keep the node disabled until a driver/ID match is confirmed.
++ */
++&i2c1 {
++	status = "okay";
++	clock-frequency = <400000>;
++
++	touchscreen@38 {
++		compatible = "focaltech,ft5826";
++		reg = <0x38>;
++		interrupt-parent = <&pio>;
++		interrupts = <10 IRQ_TYPE_EDGE_FALLING>;
++		reset-gpios = <&pio 131 GPIO_ACTIVE_LOW>;
++		/* Preserve wiring, but do not bind an unverified driver. */
++		status = "disabled";
++	};
++};
++
++/*
++ * MUSB at 0x11200000 with TPHY at 0x11210000.
++ * Gadget/console needs CONFIG_USB_MUSB_MEDIATEK and a functioning UDC.
++ * No verified VBUS/PMIC role signaling yet, forcing peripheral role only.
++ */
++&usb2phy {
++	status = "okay";
++};
++
++&usb2 {
++	status = "okay";
++	dr_mode = "peripheral";
++	maximum-speed = "high-speed";
++
++	usb_con: connector {
++		compatible = "usb-b-connector";
++		type = "micro";
++	};
++};
++
++/*
++ * LCD: vendor lcm GPIO power=147, backlight=3, reset=146.
++ * DSI is present in mt6735.dtsi, but panel model and init sequence
++ * remain unknown. Therefore do not enable &dsi yet.
++ *
++ * PMIC, Wi-Fi, audio, LTE, camera, GPU, touch remain unsupported or
++ * unverified. This build is for UART, pstore, eMMC and USB bring-up.
++ */
++
++
++&pwrap {
++	status = "okay";
++};
++
++&spm {
++	/* as on doogee-x5pro: VEN domain does not power on and blocks fb console */
++	/delete-node/ power-domain@MT6735_POWER_DOMAIN_VEN;
++};
+diff --git a/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l.dts b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l.dts
+new file mode 100644
+index 000000000..6d0488eaa
+--- /dev/null
++++ b/arch/arm64/boot/dts/mediatek/mt6735-asus-p00l.dts
+@@ -0,0 +1,57 @@
++// SPDX-License-Identifier: BSD-3-Clause
++/*
++ * ASUS ZenPad 10 Z301ML / P00L (asus8735_tb_301_n)
++ * EXPERIMENTAL MT6735 MAINLINE EARLY BRING-UP ONLY.
++ * Do not flash without validated power management and recovery procedure.
++ */
++
++/dts-v1/;
++
++#include "mt6735.dtsi"
++
++/ {
++	model = "ASUS ZenPad 10 Z301ML (P00L) - experimental";
++	compatible = "asus,z301ml", "mediatek,mt6735";
++
++	aliases {
++		serial0 = &uart0;
++	};
++
++	chosen {
++		stdout-path = "serial0:921600n8";
++	};
++
++	/* Original ASUS DTB exposes this conservative initial RAM range. */
++	memory@40000000 {
++		device_type = "memory";
++		reg = <0 0x40000000 0 0x1f000000>;
++	};
++
++	reserved-memory {
++		ramoops@43f10000 {
++			compatible = "ramoops";
++			reg = <0 0x43f10000 0 0x000e0000>;
++			record-size = <0x00080000>;
++			console-size = <0x00010000>;
++			ftrace-size = <0x00020000>;
++			pmsg-size = <0x00010000>;
++		};
++	};
++};
++
++&uart0 {
++	status = "okay";
++};
++
++&mmc0 {
++	status = "okay";
++	bus-width = <8>;
++	max-frequency = <52000000>;
++	cap-mmc-highspeed;
++	non-removable;
++	/* PMIC-specific vmmc/vqmmc supplies have not been confirmed. */
++};
++
++/* Touchscreen, display, PMIC, Wi-Fi, audio, LTE and camera require
++ * separate hardware-specific integration.
++ */
+diff --git a/arch/arm64/kernel/psci.c b/arch/arm64/kernel/psci.c
+index fabd732d0..131a62a81 100644
+--- a/arch/arm64/kernel/psci.c
++++ b/arch/arm64/kernel/psci.c
+@@ -36,12 +36,99 @@ static int __init cpu_psci_cpu_prepare(unsigned int cpu)
+ 	return 0;
+ }
+ 
++
++#include <linux/delay.h>
++#include <linux/io.h>
++#include <linux/of.h>
++
++/*
++ * MT6735 (ASUS Z301ML bring-up): stock ATF accepts PSCI CPU_ON but does not
++ * power the core's MTCMOS; the vendor 3.18 "mt-boot" enable-method does it
++ * from the kernel via SPM right after CPU_ON. Port of spm_mtcmos_ctrl_cpuN().
++ */
++#define MT6735_SPM_BASE		0x10006000
++#define SPM_POWERON_CONFIG_SET	0x000
++#define SPM_PWR_STATUS		0x60c
++#define SPM_PWR_STATUS_2ND	0x610
++#define MTC_PWR_RST_B		BIT(0)
++#define MTC_PWR_ISO		BIT(1)
++#define MTC_PWR_ON		BIT(2)
++#define MTC_PWR_ON_2ND		BIT(3)
++#define MTC_PWR_CLK_DIS		BIT(4)
++#define MTC_SRAM_CKISO		BIT(5)
++#define MTC_SRAM_ISOINT_B	BIT(6)
++#define MTC_L1_PDN		BIT(0)
++#define MTC_L1_PDN_ACK		BIT(8)
++
++static void __iomem *mt6735_spm;
++
++static int mt6735_wait(void __iomem *reg, u32 mask, u32 val)
++{
++	int i;
++
++	for (i = 0; i < 100000; i++) {
++		if ((readl(reg) & mask) == val)
++			return 0;
++		udelay(1);
++	}
++	return -ETIMEDOUT;
++}
++
++static int mt6735_mtcmos_cpu_on(unsigned int hwcpu)
++{
++	static const u16 pwr_con[4] = { 0x200, 0x218, 0x21c, 0x220 };
++	static const u16 l1_pdn[4]  = { 0x25c, 0x264, 0x26c, 0x274 };
++	static const u32 sta_bit[4] = { BIT(9), BIT(12), BIT(11), BIT(10) };
++	void __iomem *con, *l1;
++	u32 bit;
++
++	if (hwcpu < 1 || hwcpu > 3)
++		return 0;
++	if (!mt6735_spm)
++		mt6735_spm = ioremap(MT6735_SPM_BASE, 0x1000);
++	if (!mt6735_spm)
++		return -ENOMEM;
++	con = mt6735_spm + pwr_con[hwcpu];
++	l1 = mt6735_spm + l1_pdn[hwcpu];
++	bit = sta_bit[hwcpu];
++
++	if ((readl(mt6735_spm + SPM_PWR_STATUS) & bit) &&
++	    (readl(con) & MTC_PWR_RST_B)) {
++		pr_info("mt6735-mtcmos: cpu%u already powered\n", hwcpu);
++		return 0;
++	}
++	writel((0xb16 << 16) | 1, mt6735_spm + SPM_POWERON_CONFIG_SET);
++	writel(readl(con) | MTC_PWR_ON, con);
++	udelay(1);
++	writel(readl(con) | MTC_PWR_ON_2ND, con);
++	if (mt6735_wait(mt6735_spm + SPM_PWR_STATUS, bit, bit) ||
++	    mt6735_wait(mt6735_spm + SPM_PWR_STATUS_2ND, bit, bit)) {
++		pr_err("mt6735-mtcmos: cpu%u PWR_STATUS timeout\n", hwcpu);
++		return -ETIMEDOUT;
++	}
++	writel(readl(con) & ~MTC_PWR_ISO, con);
++	writel(readl(l1) & ~MTC_L1_PDN, l1);
++	if (mt6735_wait(l1, MTC_L1_PDN_ACK, 0)) {
++		pr_err("mt6735-mtcmos: cpu%u L1_PDN_ACK timeout\n", hwcpu);
++		return -ETIMEDOUT;
++	}
++	udelay(1);
++	writel(readl(con) | MTC_SRAM_ISOINT_B, con);
++	writel(readl(con) & ~MTC_SRAM_CKISO, con);
++	writel(readl(con) & ~MTC_PWR_CLK_DIS, con);
++	writel(readl(con) | MTC_PWR_RST_B, con);
++	pr_info("mt6735-mtcmos: cpu%u powered on\n", hwcpu);
++	return 0;
++}
++
+ static int cpu_psci_cpu_boot(unsigned int cpu)
+ {
+ 	phys_addr_t pa_secondary_entry = __pa_symbol(secondary_entry);
+ 	int err = psci_ops.cpu_on(cpu_logical_map(cpu), pa_secondary_entry);
+ 	if (err && err != -EPERM)
+ 		pr_err("failed to boot CPU%d (%d)\n", cpu, err);
++	else if (of_machine_is_compatible("mediatek,mt6735"))
++		err = mt6735_mtcmos_cpu_on(cpu_logical_map(cpu) & 0xff);
+ 
+ 	return err;
+ }
+diff --git a/drivers/soc/mediatek/mtk-pmic-wrap.c b/drivers/soc/mediatek/mtk-pmic-wrap.c
+index 13d8255ac..53659ee3e 100644
+--- a/drivers/soc/mediatek/mtk-pmic-wrap.c
++++ b/drivers/soc/mediatek/mtk-pmic-wrap.c
+@@ -2512,12 +2512,12 @@ static irqreturn_t pwrap_interrupt(int irqno, void *dev_id)
+ 	struct pmic_wrapper *wrp = dev_id;
+ 
+ 	rdata = pwrap_readl(wrp, PWRAP_INT_FLG);
+-	dev_err(wrp->dev, "unexpected interrupt int=0x%x\n", rdata);
++	dev_err_ratelimited(wrp->dev, "unexpected interrupt int=0x%x\n", rdata);
+ 	pwrap_writel(wrp, 0xffffffff, PWRAP_INT_CLR);
+ 
+ 	if (HAS_CAP(wrp->master->caps, PWRAP_CAP_INT1_EN)) {
+ 		rdata = pwrap_readl(wrp, PWRAP_INT1_FLG);
+-		dev_err(wrp->dev, "unexpected interrupt int1=0x%x\n", rdata);
++		dev_err_ratelimited(wrp->dev, "unexpected interrupt int1=0x%x\n", rdata);
+ 		pwrap_writel(wrp, 0xffffffff, PWRAP_INT1_CLR);
+ 	}
+ 
+@@ -2658,7 +2658,7 @@ static const struct pmic_wrapper_type pwrap_mt6735 = {
+ 	.regs = mt6735_regs,
+ 	.type = PWRAP_MT6735,
+ 	.arb_en_all = GENMASK(9, 0),
+-	.int_en_all = GENMASK(31, 0),
++	.int_en_all = GENMASK(31, 0) & ~BIT(1), /* Z301ML: bit1 storms after LK handover */
+ 	.spi_w = PWRAP_MAN_CMD_SPI_WRITE,
+ 	.wdt_src = PWRAP_WDT_SRC_MASK_ALL,
+ 	.caps = PWRAP_CAP_RESET | PWRAP_CAP_DCM,
+@@ -2670,7 +2670,7 @@ static const struct pmic_wrapper_type pwrap_mt6735m = {
+ 	.regs = mt6735m_regs,
+ 	.type = PWRAP_MT6735,
+ 	.arb_en_all = GENMASK(9, 0),
+-	.int_en_all = GENMASK(31, 0),
++	.int_en_all = GENMASK(31, 0) & ~BIT(1), /* Z301ML: bit1 storms after LK handover */
+ 	.spi_w = PWRAP_MAN_CMD_SPI_WRITE,
+ 	.wdt_src = PWRAP_WDT_SRC_MASK_ALL,
+ 	.caps = PWRAP_CAP_RESET | PWRAP_CAP_DCM,

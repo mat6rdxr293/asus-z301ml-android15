@@ -1,0 +1,15 @@
+# Z301ML: MT6735 CONSYS Wi-Fi (MTK wlan gen2) out-of-tree build for mainline 7.0
+W := $(src)/gen2
+ccflags-y := -Wno-error -w -include /home/matveysazhnov.guest/z301ml-port/connsys/compat/z301_compat.h -include /home/matveysazhnov.guest/z301ml-port/connsys/wlan/z301_wlan_compat.h -I/home/matveysazhnov.guest/z301ml-port/connsys/compat \
+  -I/home/matveysazhnov.guest/z301ml-port/connsys/wmt/include -I/home/matveysazhnov.guest/z301ml-port/connsys/wmt/linux/include -I/home/matveysazhnov.guest/z301ml-port/connsys/wmt/core/include \
+  -I$(W)/os -I$(W)/os/linux/include -I$(W)/os/linux/hif/ahb/include \
+  -I$(W)/include -I$(W)/include/nic -I$(W)/include/mgmt \
+  -DLINUX -DMT6628 -D_HIF_SDIO=1 -DDBG=0 -DCFG_SRAM_SIZE_OPTION=1 \
+  -DCFG_SUPPORT_AGPS_ASSIST=1 -DCFG_SUPPORT_TSF_USING_BOOTTIME=1 -DCFG_P2P_LEGACY_COEX_REVISE=1 -DARP_MONITER_ENABLE=1 \
+  -DCFG_SUPPORT_WAPI=0 -DCFG_SUPPORT_MCC=0 -DCFG_SUPPORT_XLOG=0 -DCFG_SUPPORT_AEE=0 -DCFG_FACTORY_MAC=1 \
+  -DCFG_SUPPORT_HOTSPOT_2_0=0 -DCFG_HS20_DEBUG=0 -DCFG_ENABLE_GTK_FRAME_FILTER=0 -DCFG_SUPPORT_MET_PROFILING=0 \
+  -DCFG_TC1_FEATURE=0 -DCREATE_NODE_DYNAMIC=1 -DCONFIG_MTK_COMBO_CHIP_CONSYS_6735=1 -DMTK_WCN_WMT_STP_EXP_SYMBOL_ABSTRACT=1 -DWMT_PLAT_ALPS=1
+KBUILD_EXTRA_SYMBOLS := /home/matveysazhnov.guest/z301ml-port/connsys/wmt/Module.symvers /home/matveysazhnov.guest/z301ml-port/connsys/btif/common/Module.symvers
+obj-m += wmt_chrdev_wifi.o
+obj-m += wlan_gen2.o
+wlan_gen2-y := gen2/common/dump.o gen2/common/wlan_lib.o gen2/common/wlan_oid.o gen2/common/wlan_bow.o gen2/common/debug.o gen2/common/wlan_p2p.o gen2/nic/nic.o gen2/nic/nic_tx.o gen2/nic/nic_rx.o gen2/nic/nic_pwr_mgt.o gen2/nic/cmd_buf.o gen2/nic/que_mgt.o gen2/nic/nic_cmd_event.o gen2/nic/p2p_nic.o gen2/os/linux/gl_init.o gen2/os/linux/gl_kal.o gen2/os/linux/gl_bow.o gen2/os/linux/gl_wext.o gen2/os/linux/gl_wext_priv.o gen2/os/linux/gl_rst.o gen2/os/linux/gl_cfg80211.o gen2/os/linux/gl_vendor.o gen2/os/linux/platform.o gen2/os/linux/gl_proc.o gen2/os/linux/platform_wifi.o gen2/os/linux/gl_p2p.o gen2/os/linux/gl_p2p_cfg80211.o gen2/os/linux/gl_p2p_init.o gen2/os/linux/gl_p2p_kal.o gen2/mgmt/ais_fsm.o gen2/mgmt/aaa_fsm.o gen2/mgmt/assoc.o gen2/mgmt/auth.o gen2/mgmt/bss.o gen2/mgmt/cnm.o gen2/mgmt/cnm_timer.o gen2/mgmt/cnm_mem.o gen2/mgmt/hem_mbox.o gen2/mgmt/mib.o gen2/mgmt/privacy.o gen2/mgmt/rate.o gen2/mgmt/rlm.o gen2/mgmt/rlm_domain.o gen2/mgmt/rlm_obss.o gen2/mgmt/rlm_protection.o gen2/mgmt/rsn.o gen2/mgmt/saa_fsm.o gen2/mgmt/scan.o gen2/mgmt/scan_fsm.o gen2/mgmt/sec_fsm.o gen2/mgmt/swcr.o gen2/mgmt/roaming_fsm.o gen2/mgmt/hs20.o gen2/mgmt/wnm.o gen2/mgmt/qosmap.o gen2/mgmt/tdls.o gen2/mgmt/tdls_com.o gen2/mgmt/stats.o gen2/mgmt/p2p_assoc.o gen2/mgmt/p2p_bss.o gen2/mgmt/p2p_fsm.o gen2/mgmt/p2p_func.o gen2/mgmt/p2p_rlm.o gen2/mgmt/p2p_rlm_obss.o gen2/mgmt/p2p_scan.o gen2/mgmt/p2p_ie.o gen2/mgmt/p2p_state.o gen2/os/linux/hif/ahb/arm.o gen2/os/linux/hif/ahb/ahb.o gen2/os/linux/hif/ahb/mt6735/ahb_pdma.o
