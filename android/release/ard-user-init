@@ -1,0 +1,20 @@
+#!/bin/busybox sh
+# Z301ML Android pre-init (release build): hand off to Android init (legacy system-as-root).
+# Unlike the bring-up variant it does NOT re-arm the BCB (reboots stay in Android) and has no
+# watchdog/keep-file guard.
+B=/bin/busybox
+$B mount -t devtmpfs devtmpfs /dev
+$B mount -t proc proc /proc
+$B mount -t sysfs sysfs /sys
+exec >/dev/kmsg 2>&1
+echo "Z301ML-PREINIT: start (release)"
+# system suspend/resume is not implemented on this board yet: keep it awake
+echo z301ml > /sys/power/wake_lock
+find_part() { for u in /sys/class/block/*/uevent; do $B grep -q "^PARTNAME=$1\$" $u && { $B basename $($B dirname $u); return; }; done; }
+i=0; while [ -z "$(find_part system)" ] && [ $i -lt 100 ]; do $B sleep 0.1; i=$((i+1)); done
+SYS=$(find_part system)
+$B mount -t ext4 -o ro /dev/$SYS /newroot || { echo "Z301ML-PREINIT: mount system FAILED"; $B sleep 5; echo b > /proc/sysrq-trigger; }
+$B umount /proc; $B umount /sys
+exec >/dev/null 2>&1
+$B umount -l /dev
+exec $B switch_root /newroot /init
